@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import dbConnect from '@/lib/mongodb';
 import Event from '@/models/Event';
 import { NextResponse } from 'next/server';
