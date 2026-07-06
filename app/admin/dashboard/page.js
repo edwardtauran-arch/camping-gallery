@@ -360,27 +360,22 @@ export default function AdminDashboard() {
                   </div>
 
                   <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100">
-                    {/* Toggle visibility - saklar style */}
-                    <button
-                      onClick={() => handleToggleVisibility(event._id, event.hidden)}
-                      className="flex items-center gap-2 group"
-                      title={event.hidden ? 'Klik untuk tampilkan' : 'Klik untuk sembunyikan'}
+                    {/* Toggle visibility - static read-only grey switch */}
+                    <div
+                      className="flex items-center gap-2 select-none cursor-default"
+                      title={event.hidden ? 'Status: Tersembunyi (Ubah lewat form Edit)' : 'Status: Tampil (Ubah lewat form Edit)'}
                     >
                       {/* Switch track */}
-                      <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
-                        event.hidden ? 'bg-slate-300' : 'bg-emerald-500'
-                      }`}>
+                      <div className="relative w-10 h-[22px] rounded-full bg-slate-200">
                         {/* Switch knob */}
-                        <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
+                        <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-slate-400 transition-all duration-300 ${
                           event.hidden ? 'left-[3px]' : 'left-[21px]'
                         }`} />
                       </div>
-                      <span className={`text-[11px] font-semibold transition-colors ${
-                        event.hidden ? 'text-slate-400' : 'text-emerald-700'
-                      }`}>
+                      <span className="text-[11px] font-semibold text-slate-400">
                         {event.hidden ? 'Tersembunyi' : 'Tampil'}
                       </span>
-                    </button>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       <a
@@ -464,24 +459,20 @@ export default function AdminDashboard() {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handleToggleVisibility(event._id, event.hidden)}
-                          className="flex items-center gap-2 group"
-                          title={event.hidden ? 'Klik untuk tampilkan' : 'Klik untuk sembunyikan'}
+                        {/* Toggle visibility - static read-only grey switch */}
+                        <div
+                          className="flex items-center gap-2 select-none cursor-default"
+                          title={event.hidden ? 'Status: Tersembunyi (Ubah lewat form Edit)' : 'Status: Tampil (Ubah lewat form Edit)'}
                         >
-                          <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
-                            event.hidden ? 'bg-slate-300' : 'bg-emerald-500'
-                          }`}>
-                            <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
+                          <div className="relative w-10 h-[22px] rounded-full bg-slate-200">
+                            <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-slate-400 transition-all duration-300 ${
                               event.hidden ? 'left-[3px]' : 'left-[21px]'
                             }`} />
                           </div>
-                          <span className={`text-[11px] font-semibold ${
-                            event.hidden ? 'text-slate-400' : 'text-emerald-700'
-                          }`}>
+                          <span className="text-[11px] font-semibold text-slate-400">
                             {event.hidden ? 'Sembunyi' : 'Tampil'}
                           </span>
-                        </button>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end gap-2">
