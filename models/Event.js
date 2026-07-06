@@ -6,6 +6,7 @@ const EventSchema = new mongoose.Schema({
   driveFolderId: { type: String, required: true },
   date: { type: Date, required: true },
   description: { type: String },
+  hidden: { type: Boolean, default: false },
   // Tambahan untuk menyimpan koordinat wajah hasil scan AI
   indexedPhotos: [{
     id: String,
@@ -16,4 +17,8 @@ const EventSchema = new mongoose.Schema({
   }]
 });
 
-export default mongoose.models.Event || mongoose.model('Event', EventSchema);
+if (mongoose.models.Event) {
+  delete mongoose.models.Event;
+}
+
+export default mongoose.model('Event', EventSchema);

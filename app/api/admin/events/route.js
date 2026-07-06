@@ -49,14 +49,18 @@ export async function PUT(request) {
   if (!isAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await dbConnect();
   try {
-    const { id, title, slug, driveFolderId, date, description } = await request.json();
+    const body = await request.json();
+    console.log("[API EVENTS PUT] Received body:", body);
+    const { id, title, slug, driveFolderId, date, description, hidden } = body;
     const updatedEvent = await Event.findByIdAndUpdate(
       id,
-      { title, slug, driveFolderId, date, description },
+      { title, slug, driveFolderId, date, description, hidden: !!hidden },
       { new: true } // Mengembalikan data terbaru setelah di-update
     );
+    console.log("[API EVENTS PUT] Updated event in DB:", updatedEvent);
     return NextResponse.json({ success: true, data: updatedEvent });
   } catch (err) {
+    console.error("[API EVENTS PUT] Error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
   }
 }
@@ -68,6 +72,22 @@ export async function DELETE(request) {
     const { id } = await request.json();
     await Event.findByIdAndDelete(id);
     return NextResponse.json({ success: true });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 400 });
+  }
+}
+
+// Toggle visibility (hidden/show)
+export async function PATCH(request) {
+  if (!isAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await dbConnect();
+  try {
+    const { id } = await request.json();
+    const event = await Event.findById(id);
+    if (!event) return NextResponse.json({ success: false, error: 'Event not found' }, { status: 404 });
+    event.hidden = !event.hidden;
+    await event.save();
+    return NextResponse.json({ success: true, data: { hidden: event.hidden } });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
   }

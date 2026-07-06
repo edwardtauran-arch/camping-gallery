@@ -22,7 +22,7 @@ export default function RootLayout({ children }) {
         </main>
 
         <footer className="bg-white border-t border-slate-200 py-6 mt-12 text-center text-sm text-slate-500">
-          © {new Date().getFullYear()} Camping Gallery. Powered by Next.js & Google Drive API.
+          © {new Date().getFullYear()} Camping Gallery.
         </footer>
       </body>
     </html>

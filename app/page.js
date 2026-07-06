@@ -1,6 +1,6 @@
 import dbConnect from '@/lib/mongodb';
 import Event from '@/models/Event';
-import Link from 'next/link';
+import EventCard from './components/EventCard';
 import { getPhotosFromFolder } from '@/lib/gdrive';
 
 // Mengaktifkan revalidasi otomatis setiap 1 jam agar data tetap segar
@@ -8,7 +8,7 @@ export const revalidate = 3600;
 
 export default async function HomePage() {
   await dbConnect();
-  const events = await Event.find({}).sort({ date: -1 });
+  const events = await Event.find({ hidden: { $ne: true } }).sort({ date: -1 });
 
   const eventsWithCount = await Promise.all(
     events.map(async (event) => {
@@ -36,27 +36,9 @@ export default async function HomePage() {
           <p className="text-slate-500">Belum ada album event yang terdaftar di database.</p>
         </div>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {eventsWithCount.map((event) => (
-            <div key={event._id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
-              <div className="p-6">
-                <div className="flex justify-between items-center gap-2">
-                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
-                    {new Date(event.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
-                  </span>
-                  <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full whitespace-nowrap border border-blue-200">
-                    {event.drivePhotosCount || 0} Foto
-                  </span>
-                </div>
-                <h2 className="text-xl font-bold mt-3 text-slate-900">{event.title}</h2>
-                <p className="text-slate-600 mt-2 text-sm line-clamp-3">{event.description || 'Tidak ada deskripsi.'}</p>
-              </div>
-              <div className="p-6 pt-0">
-                <Link href={`/gallery/${event.slug}`} className="block w-full text-center bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm py-2.5 px-4 rounded-lg transition-colors">
-                  Buka Galeri Foto
-                </Link>
-              </div>
-            </div>
+            <EventCard key={event._id} event={JSON.parse(JSON.stringify(event))} />
           ))}
         </div>
       )}
