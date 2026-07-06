@@ -19,12 +19,12 @@ export default async function GalleryPage({ params }) {
 
   return (
     <div>
-      <div className="mb-8">
-        <Link href="/" className="text-sm font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mb-4">
+      <div className="mb-5 sm:mb-8">
+        <Link href="/" className="text-xs sm:text-sm font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mb-3 sm:mb-4">
           ← Kembali ke Beranda
         </Link>
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">{event.title}</h1>
-        <p className="text-slate-500 mt-1">Total: {photos.length} Foto terdeteksi di storage</p>
+        <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">{event.title}</h1>
+        <p className="text-slate-500 mt-1 text-xs sm:text-base">Total: {photos.length} Foto terdeteksi di storage</p>
       </div>
 
       {photos.length === 0 ? (
