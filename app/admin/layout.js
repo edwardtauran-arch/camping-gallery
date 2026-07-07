@@ -9,7 +9,6 @@ export const SCAN_CHANNEL = 'bg-scan-progress';
 export default function AdminLayout({ children }) {
   const [faceApiReady, setFaceApiReady] = useState(false);
   const [bgScanJob, setBgScanJob] = useState(null);
-  const [hasUnindexed, setHasUnindexed] = useState(false);
 
   const faceApiLoadingRef = useRef(false);
   const bgScanRunning = useRef(false);
@@ -24,23 +23,6 @@ export default function AdminLayout({ children }) {
 
   const broadcast = useCallback((data) => {
     try { channelRef.current?.postMessage(data); } catch (_) {}
-  }, []);
-
-  // Check if any events need scanning (runs once on mount)
-  useEffect(() => {
-    async function checkNeedScan() {
-      try {
-        const res = await fetch('/api/admin/events');
-        if (!res.ok) return;
-        const json = await res.json();
-        const events = json.data || [];
-        const needs = events.some(ev =>
-          (ev.drivePhotosCount || 0) > (ev.indexedPhotos || []).length
-        );
-        setHasUnindexed(needs);
-      } catch (_) {}
-    }
-    checkNeedScan();
   }, []);
 
   const loadFaceApiModels = useCallback(async () => {
@@ -147,7 +129,7 @@ export default function AdminLayout({ children }) {
       const needScan = events.filter(ev =>
         (ev.drivePhotosCount || 0) > (ev.indexedPhotos || []).length
       );
-      if (needScan.length === 0) { setHasUnindexed(false); return; }
+      if (needScan.length === 0) return;
 
       const event = needScan[0];
       const photosRes = await fetch(`/api/admin/events?slug=${event.slug}&photos=1`);
@@ -175,14 +157,11 @@ export default function AdminLayout({ children }) {
 
   return (
     <>
-      {/* Face-API Script — lazy load only when unindexed events exist */}
-      {hasUnindexed && (
-        <Script
-          src="/js/face-api.js"
-          strategy="lazyOnload"
-          onLoad={() => loadFaceApiModels()}
-        />
-      )}
+      <Script
+        src="/js/face-api.js"
+        strategy="afterInteractive"
+        onLoad={() => loadFaceApiModels()}
+      />
 
       {children}
 
@@ -212,5 +191,4 @@ export default function AdminLayout({ children }) {
         </div>
       )}
     </>
-  );
 }
