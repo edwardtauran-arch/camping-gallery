@@ -13,10 +13,10 @@ export default async function HomePage() {
     <div>
       <div className="text-center max-w-2xl mx-auto mb-8 sm:mb-12 px-2">
         <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">
-          PhotoFinder Dokumentasi
+          PhotoFinder
         </h1>
         <p className="mt-3 sm:mt-4 text-sm sm:text-lg text-slate-600">
-          Pilih event camping di bawah ini untuk melihat dan mengunduh seluruh keseruan foto dokumentasi beresolusi penuh.
+          Pilih event di bawah ini untuk melihat, mencari wajah, dan mengunduh seluruh keseruan foto dokumentasi beresolusi penuh.
         </p>
       </div>
 

@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Camping PhotoFinder',
-  description: 'Dokumentasi Galeri Foto Kegiatan Camping Anda',
+  title: 'PhotoFinder',
+  description: 'Dokumentasi Galeri Foto Kegiatan Anda',
 };
 
 export default function RootLayout({ children }) {
@@ -12,7 +12,7 @@ export default function RootLayout({ children }) {
         <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex justify-between items-center">
             <a href="/" className="text-base sm:text-xl font-bold tracking-tight text-emerald-700 flex items-center gap-1.5 sm:gap-2">
-              ⛺ CAMPING<span className="text-slate-800 font-semibold">GALLERY</span>
+              📸 PHOTO<span className="text-slate-800 font-semibold">FINDER</span>
             </a>
           </div>
         </header>
@@ -22,7 +22,7 @@ export default function RootLayout({ children }) {
         </main>
 
         <footer className="bg-white border-t border-slate-200 py-6 mt-12 text-center text-sm text-slate-500">
-          © {new Date().getFullYear()} Camping Gallery.
+          © {new Date().getFullYear()} PhotoFinder.
         </footer>
       </body>
     </html>
