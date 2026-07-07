@@ -294,30 +294,26 @@ export default function AdminDashboard() {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <a href={`/gallery/${event.slug}`} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
-                        title="Buka halaman galeri">
-                        <ExternalLink size={13} className="flex-shrink-0" />
-                        <span className="hidden xl:inline">Buka</span>
+                        className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
+                        title="Buka Halaman Galeri">
+                        <ExternalLink size={15} className="flex-shrink-0" />
                       </a>
                       <a href={`/admin/scan/${event.slug}`}
-                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
+                        className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
                         title="Scan Wajah AI">
-                        <Cpu size={13} className="flex-shrink-0" />
-                        <span className="hidden xl:inline">Scan</span>
+                        <Cpu size={15} className="flex-shrink-0" />
                       </a>
                       <button onClick={() => startEdit(event)}
-                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
+                        className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
                         title="Ubah Data Event">
-                        <Pencil size={13} className="flex-shrink-0" />
-                        <span className="hidden xl:inline">Ubah</span>
+                        <Pencil size={15} className="flex-shrink-0" />
                       </button>
                       <button onClick={() => handleDelete(event._id)}
-                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-all"
+                        className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-all"
                         title="Hapus Kategori">
-                        <Trash2 size={13} className="flex-shrink-0" />
-                        <span className="hidden xl:inline">Hapus</span>
+                        <Trash2 size={15} className="flex-shrink-0" />
                       </button>
                     </div>
                   </div>
