@@ -506,6 +506,48 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
+                  {/* Inline Background Scan Progress (only for the event currently being scanned) */}
+                  {bgScanJob && bgScanJob.eventId === event._id && (
+                    <div className="mt-3 rounded-xl bg-slate-900 px-3 py-2.5 border border-slate-700">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                          {bgScanJob.done
+                            ? <CheckCircle2 size={13} className="text-emerald-400" />
+                            : <Loader2 size={13} className="text-amber-400 animate-spin" />}
+                          <span className="text-[11px] font-bold text-white">
+                            {bgScanJob.done ? 'Scan Selesai!' : 'Scanning Latar Belakang...'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => { bgStopRef.current = true; setBgScanJob(null); }}
+                          className="text-slate-500 hover:text-white transition-colors"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-1.5">
+                        <div
+                          className="h-1.5 rounded-full transition-all duration-500"
+                          style={{
+                            width: bgScanJob.total > 0 ? `${Math.round((bgScanJob.progress / bgScanJob.total) * 100)}%` : '0%',
+                            background: bgScanJob.done ? '#34d399' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
+                          }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-[10px] text-slate-400">{bgScanJob.progress} / {bgScanJob.total} foto</span>
+                        <span className="text-[10px] text-slate-400">
+                          {bgScanJob.total > 0 ? Math.round((bgScanJob.progress / bgScanJob.total) * 100) : 0}%
+                        </span>
+                      </div>
+                      {bgScanJob.done && (
+                        <button onClick={() => setBgScanJob(null)} className="mt-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors">
+                          Tutup
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {/* Fully opaque button bar */}
                   <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100 flex-wrap sm:flex-nowrap">
                     {/* Toggle visibility - static read-only grey switch */}
@@ -936,80 +978,6 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* === Floating Background Scan Progress Pill === */}
-      {bgScanJob && (
-        <div className="fixed bottom-6 left-6 z-[200] max-w-xs w-full">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 pt-3 pb-2">
-              <div className="flex items-center gap-2">
-                {bgScanJob.done ? (
-                  <CheckCircle2 size={16} className="text-emerald-400" />
-                ) : (
-                  <Loader2 size={16} className="text-amber-400 animate-spin" />
-                )}
-                <span className="text-xs font-bold text-white">
-                  {bgScanJob.done ? 'Scan Selesai' : 'Scanning Latar Belakang'}
-                </span>
-              </div>
-              <button
-                onClick={() => { bgStopRef.current = true; setBgScanJob(null); }}
-                className="text-slate-400 hover:text-white transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </div>
-
-            {/* Event name */}
-            <div className="px-4 pb-1">
-              <p className="text-xs text-slate-300 truncate">{bgScanJob.eventTitle}</p>
-            </div>
-
-            {/* Progress bar */}
-            <div className="px-4 pb-2">
-              <div className="w-full bg-slate-700 rounded-full h-1.5">
-                <div
-                  className="h-1.5 rounded-full transition-all duration-300"
-                  style={{
-                    width: bgScanJob.total > 0 ? `${Math.round((bgScanJob.progress / bgScanJob.total) * 100)}%` : '0%',
-                    background: bgScanJob.done ? '#34d399' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
-                  }}
-                />
-              </div>
-              <div className="flex justify-between mt-1">
-                <span className="text-[10px] text-slate-400">
-                  {bgScanJob.progress} / {bgScanJob.total} foto
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {bgScanJob.total > 0 ? Math.round((bgScanJob.progress / bgScanJob.total) * 100) : 0}%
-                </span>
-              </div>
-            </div>
-
-            {/* Queue info */}
-            {bgScanQueue.length > 0 && !bgScanJob.done && (
-              <div className="px-4 pb-3">
-                <p className="text-[10px] text-slate-500">
-                  +{bgScanQueue.length} event lain menunggu antrian
-                </p>
-              </div>
-            )}
-
-            {/* Done state auto-dismiss button */}
-            {bgScanJob.done && (
-              <div className="px-4 pb-3">
-                <button
-                  onClick={() => setBgScanJob(null)}
-                  className="text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors"
-                >
-                  Tutup notifikasi
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}
