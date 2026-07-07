@@ -1,8 +1,7 @@
 'use client';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Script from 'next/script';
-import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Brain, Loader2, CheckCircle2, X, ExternalLink } from 'lucide-react';
+import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Loader2, CheckCircle2, ExternalLink } from 'lucide-react';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -15,18 +14,27 @@ export default function AdminDashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [viewMode, setViewMode] = useState('grid');
 
-  // === Background Auto-Scan State ===
-  const [faceApiReady, setFaceApiReady] = useState(false);
-  const [bgScanJob, setBgScanJob] = useState(null); // { eventId, eventTitle, progress, total, done, error }
-  const [bgScanQueue, setBgScanQueue] = useState([]); // list of events pending scan
-  const bgStopRef = useRef(false);
-  const bgScanRunning = useRef(false);
-  const faceApiLoadingRef = useRef(false);
+  // Receive scan progress from admin layout via BroadcastChannel
+  const [bgScanJob, setBgScanJob] = useState(null);
 
-  const filteredEvents = events.filter(event => 
-    event.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+  useEffect(() => {
+    const channel = new BroadcastChannel('bg-scan-progress');
+    channel.onmessage = (e) => {
+      const data = e.data;
+      if (data.type === 'batch-saved') {
+        fetchEvents();
+      } else {
+        setBgScanJob(data);
+        if (data.done) fetchEvents();
+      }
+    };
+    return () => channel.close();
+  }, []);
+
+  const filteredEvents = events.filter(event =>
+    event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (event.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     event.slug.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -35,9 +43,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/events');
       const json = await res.json();
-      if (json.success) {
-        setEvents(json.data);
-      }
+      if (json.success) setEvents(json.data);
     } catch (err) {
       console.error("Gagal memuat data event:", err);
     } finally {
@@ -45,166 +51,12 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchEvents();
-  }, []);
+  useEffect(() => { fetchEvents(); }, []);
 
-  const slugify = (text) => {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '') 
-      .replace(/\s+/g, '-')         
-      .replace(/-+/g, '-');         
-  };
+  const slugify = (text) => text.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-');
 
-  const handleTitleChange = (e) => {
-    const titleValue = e.target.value;
-    setForm({
-      ...form,
-      title: titleValue,
-      slug: slugify(titleValue)
-    });
-  };
-
-  const handleEditTitleChange = (e) => {
-    const titleValue = e.target.value;
-    setEditForm({
-      ...editForm,
-      title: titleValue,
-      slug: slugify(titleValue)
-    });
-  };
-
-  // === Background Scan Core Logic ===
-  const loadFaceApiModels = useCallback(async () => {
-    if (faceApiLoadingRef.current || faceApiReady) return;
-    faceApiLoadingRef.current = true;
-    try {
-      const faceapi = window.faceapi;
-      if (!faceapi) return;
-      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-      await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-      await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-      setFaceApiReady(true);
-    } catch (err) {
-      console.error('[BgScan] Gagal load model:', err);
-      faceApiLoadingRef.current = false;
-    }
-  }, [faceApiReady]);
-
-  const runBackgroundScan = useCallback(async (event, photoList) => {
-    if (bgScanRunning.current) return;
-    bgScanRunning.current = true;
-    bgStopRef.current = false;
-
-    const faceapi = window.faceapi;
-    if (!faceapi || !faceapi.nets.tinyFaceDetector.params) {
-      bgScanRunning.current = false;
-      return;
-    }
-
-    const alreadyIndexedIds = new Set((event.indexedPhotos || []).map(p => p.id));
-    const toScan = photoList.filter(p => !alreadyIndexedIds.has(p.id));
-    if (toScan.length === 0) { bgScanRunning.current = false; return; }
-
-    const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
-    let batch = [];
-    let done = 0;
-
-    setBgScanJob({ eventId: event._id, eventTitle: event.title, progress: 0, total: toScan.length, done: false, error: null });
-
-    for (let i = 0; i < toScan.length; i++) {
-      if (bgStopRef.current) break;
-
-      const photo = toScan[i];
-      try {
-        const proxyUrl = `/api/proxy-image?id=${photo.id}&sz=w400`;
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = proxyUrl;
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error('Load failed'));
-        });
-
-        const detections = await faceapi
-          .detectAllFaces(img, detectorOptions)
-          .withFaceLandmarks()
-          .withFaceDescriptors();
-
-        const faceDescriptors = detections.map(d => Array.from(d.descriptor));
-        batch.push({ id: photo.id, name: photo.name, thumbnailLink: photo.thumbnailLink, webContentLink: photo.webContentLink, faceDescriptors });
-      } catch (_) {
-        batch.push({ id: photo.id, name: photo.name, thumbnailLink: photo.thumbnailLink || '', webContentLink: photo.webContentLink || '', faceDescriptors: [] });
-      }
-
-      done++;
-      setBgScanJob(prev => prev ? { ...prev, progress: done } : prev);
-
-      // Save every 5 photos or at end
-      if (batch.length >= 5 || i === toScan.length - 1) {
-        try {
-          await fetch('/api/index-photos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ eventId: event._id, photos: batch }),
-          });
-          // Update the event's indexed count in local state
-          const savedBatch = [...batch];
-          setEvents(prev => prev.map(ev =>
-            ev._id === event._id
-              ? { ...ev, indexedPhotos: [...(ev.indexedPhotos || []), ...savedBatch] }
-              : ev
-          ));
-        } catch (err) {
-          console.error('[BgScan] Gagal simpan batch:', err);
-        }
-        batch = [];
-      }
-    }
-
-    bgScanRunning.current = false;
-    setBgScanJob(prev => prev ? { ...prev, done: true } : null);
-
-    // If queue has more events, start next
-    setBgScanQueue(q => {
-      if (q.length > 0) {
-        const [next, ...rest] = q;
-        // slight delay before next
-        setTimeout(() => triggerScanForEvent(next), 1500);
-        return rest;
-      }
-      return [];
-    });
-  }, []);
-
-  const triggerScanForEvent = useCallback(async (event) => {
-    // First fetch photos for this event from drive
-    try {
-      const res = await fetch(`/api/admin/events?slug=${event.slug}&photos=1`);
-      if (!res.ok) return;
-      const json = await res.json();
-      const photos = json.photos || [];
-      if (photos.length === 0) return;
-      await runBackgroundScan(event, photos);
-    } catch (err) {
-      console.error('[BgScan] Gagal ambil foto:', err);
-    }
-  }, [runBackgroundScan]);
-
-  // Auto-trigger when faceApi is ready: scan any event with unindexed photos
-  useEffect(() => {
-    if (!faceApiReady || bgScanRunning.current) return;
-    const needScan = events.filter(ev => {
-      const indexed = (ev.indexedPhotos || []).length;
-      const total = ev.drivePhotosCount || 0;
-      return total > 0 && indexed < total;
-    });
-    if (needScan.length === 0) return;
-    const [first, ...rest] = needScan;
-    setBgScanQueue(rest);
-    triggerScanForEvent(first);
-  }, [faceApiReady, events, triggerScanForEvent]);
+  const handleTitleChange = (e) => setForm({ ...form, title: e.target.value, slug: slugify(e.target.value) });
+  const handleEditTitleChange = (e) => setEditForm({ ...editForm, title: e.target.value, slug: slugify(e.target.value) });
 
   const handleAddSubmit = async (e) => {
     e.preventDefault();
@@ -213,18 +65,10 @@ export default function AdminDashboard() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
     });
-
     if (res.ok) {
-      const json = await res.json();
-      const newEvent = json.data;
-
       setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
       setIsAddModalOpen(false);
       await fetchEvents();
-      // Auto-trigger background scan for the new event
-      if (faceApiReady && !bgScanRunning.current) {
-        setTimeout(() => triggerScanForEvent(newEvent), 800);
-      }
     } else {
       alert('❌ Gagal menambahkan event.');
     }
@@ -237,7 +81,6 @@ export default function AdminDashboard() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: editingId, ...editForm })
     });
-
     if (res.ok) {
       alert('✅ Data Event Berhasil Diperbarui!');
       cancelEdit();
@@ -250,14 +93,7 @@ export default function AdminDashboard() {
   const startEdit = (event) => {
     setEditingId(event._id);
     const formattedDate = event.date ? new Date(event.date).toISOString().split('T')[0] : '';
-    setEditForm({
-      title: event.title,
-      slug: event.slug,
-      driveFolderId: event.driveFolderId,
-      date: formattedDate,
-      description: event.description || '',
-      hidden: event.hidden || false
-    });
+    setEditForm({ title: event.title, slug: event.slug, driveFolderId: event.driveFolderId, date: formattedDate, description: event.description || '', hidden: event.hidden || false });
     setIsEditModalOpen(true);
   };
 
@@ -269,13 +105,7 @@ export default function AdminDashboard() {
 
   const handleDelete = async (id) => {
     if (!confirm('Apakah kamu yakin ingin menghapus kategori event camping ini beserta galeri fotonya?')) return;
-    
-    const res = await fetch('/api/admin/events', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    });
-
+    const res = await fetch('/api/admin/events', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
     if (res.ok) {
       alert('🗑️ Event berhasil dihapus!');
       if (editingId === id) cancelEdit();
@@ -293,32 +123,12 @@ export default function AdminDashboard() {
   const handleToggleVisibility = async (id, currentHidden) => {
     const action = currentHidden ? 'menampilkan' : 'menyembunyikan';
     if (!confirm(`Apakah Anda yakin ingin ${action} event camping ini dari halaman publik?`)) return;
-
-    // Update local state instantly (optimistic UI update)
-    setEvents(prevEvents =>
-      prevEvents.map(event =>
-        event._id === id ? { ...event, hidden: !event.hidden } : event
-      )
-    );
-
+    setEvents(prev => prev.map(ev => ev._id === id ? { ...ev, hidden: !ev.hidden } : ev));
     try {
-      const res = await fetch('/api/admin/events', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      if (res.ok) {
-        fetchEvents();
-      } else {
-        throw new Error('Gagal mengupdate visibilitas');
-      }
-    } catch (err) {
-      // Revert if request failed
-      setEvents(prevEvents =>
-        prevEvents.map(event =>
-          event._id === id ? { ...event, hidden: currentHidden } : event
-        )
-      );
+      const res = await fetch('/api/admin/events', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      if (res.ok) { fetchEvents(); } else { throw new Error(); }
+    } catch {
+      setEvents(prev => prev.map(ev => ev._id === id ? { ...ev, hidden: currentHidden } : ev));
       alert('❌ Gagal mengubah visibilitas.');
     }
   };
@@ -326,41 +136,18 @@ export default function AdminDashboard() {
   const handleSyncPhotosCount = async (id) => {
     setSyncingId(id);
     try {
-      const res = await fetch('/api/admin/events', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'sync' })
-      });
+      const res = await fetch('/api/admin/events', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'sync' }) });
       const json = await res.json();
       if (json.success) {
-        setEvents(prevEvents =>
-          prevEvents.map(event =>
-            event._id === id ? { ...event, drivePhotosCount: json.data.drivePhotosCount } : event
-          )
-        );
-        alert('🔄 Sinkronisasi jumlah foto Google Drive berhasil!');
-      } else {
-        alert('❌ Gagal sinkronisasi data.');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('❌ Terjadi kesalahan saat sinkronisasi.');
-    } finally {
-      setSyncingId(null);
-    }
+        setEvents(prev => prev.map(ev => ev._id === id ? { ...ev, drivePhotosCount: json.data.drivePhotosCount } : ev));
+        alert('🔄 Sinkronisasi berhasil!');
+      } else { alert('❌ Gagal sinkronisasi.'); }
+    } catch { alert('❌ Terjadi kesalahan.'); }
+    finally { setSyncingId(null); }
   };
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      {/* Face-API Script — lazy load only when events need scanning */}
-      {events.some(ev => (ev.drivePhotosCount || 0) > (ev.indexedPhotos || []).length) && (
-        <Script
-          src="/js/face-api.js"
-          strategy="lazyOnload"
-          onLoad={() => loadFaceApiModels()}
-        />
-      )}
-
       {/* Top Navbar */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-wrap gap-3">
         <h1 className="text-lg sm:text-xl font-bold text-slate-900">🛠️ Panel Kontrol Admin</h1>
@@ -369,19 +156,20 @@ export default function AdminDashboard() {
             onClick={() => setIsAddModalOpen(true)}
             className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg shadow transition-colors"
           >
-            <PlusCircle size={14} className="sm:w-4 sm:h-4" /> Tambah Event Baru
+            <PlusCircle size={14} />
+            <span className="hidden sm:inline">Tambah Event Baru</span>
           </button>
           <button onClick={handleLogout} className="flex items-center gap-1.5 text-xs text-red-600 font-semibold hover:underline">
-            <LogOut size={14} /> Keluar Admin
+            <LogOut size={14} />
+            <span className="hidden sm:inline">Keluar Admin</span>
           </button>
         </div>
       </div>
-      
+
       {/* List Daftar Camping */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">📋 Daftar Kategori Camping</h2>
-          
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
             {/* Search Bar */}
             <div className="relative flex-grow sm:flex-grow-0 sm:w-64">
@@ -394,42 +182,16 @@ export default function AdminDashboard() {
                 className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none"
               />
               {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 hover:text-slate-600"
-                >
-                  X
-                </button>
+                <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 hover:text-slate-600">✕</button>
               )}
             </div>
-
-            {/* View Mode Toggle Buttons */}
+            {/* View Mode Toggle */}
             <div className="flex border border-slate-200 rounded-lg overflow-hidden self-end sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setViewMode('grid')}
-                className={`p-2 flex items-center gap-1.5 text-xs font-semibold transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-                title="Tampilan Grid"
-              >
-                <Grid size={14} />
-                <span className="hidden sm:inline">Grid</span>
+              <button type="button" onClick={() => setViewMode('grid')} className={`p-2 flex items-center gap-1.5 text-xs font-semibold transition-colors ${viewMode === 'grid' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`} title="Tampilan Grid">
+                <Grid size={14} /><span className="hidden sm:inline">Grid</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={`p-2 flex items-center gap-1.5 text-xs font-semibold transition-colors ${
-                  viewMode === 'list'
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-                title="Tampilan List/Tabel"
-              >
-                <List size={14} />
-                <span className="hidden sm:inline">List</span>
+              <button type="button" onClick={() => setViewMode('list')} className={`p-2 flex items-center gap-1.5 text-xs font-semibold transition-colors ${viewMode === 'list' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`} title="Tampilan List">
+                <List size={14} /><span className="hidden sm:inline">List</span>
               </button>
             </div>
           </div>
@@ -439,39 +201,26 @@ export default function AdminDashboard() {
           <p className="text-sm text-slate-500 py-4">Memuat data database...</p>
         ) : filteredEvents.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-slate-200 rounded-xl">
-            <p className="text-sm text-slate-500 font-medium">Tidak ada kategori camping yang cocok dengan pencarian Anda.</p>
+            <p className="text-sm text-slate-500 font-medium">Tidak ada kategori camping yang cocok.</p>
           </div>
         ) : viewMode === 'grid' ? (
-          /* Grid View Mode */
+          /* Grid View */
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredEvents.map((event) => {
               const driveCount = event.drivePhotosCount || 0;
+              const isScanning = bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done;
+              const scanDone = bgScanJob && bgScanJob.eventId === event._id && bgScanJob.done;
               return (
-                <div 
-                  key={event._id} 
-                  className={`rounded-xl border p-5 flex flex-col justify-between shadow-sm transition-all duration-200 hover:shadow-md bg-white border-slate-200 hover:-translate-y-0.5`}
-                >
-                  {/* Faded content if event is hidden (action buttons below are NOT faded) */}
+                <div key={event._id} className="rounded-xl border p-5 flex flex-col justify-between shadow-sm transition-all duration-200 hover:shadow-md bg-white border-slate-200 hover:-translate-y-0.5">
                   <div className={`space-y-3 transition-opacity ${event.hidden ? 'opacity-60' : ''}`}>
                     <div className="flex justify-between items-start gap-2">
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">{event.title}</h3>
                       <div className="flex items-center gap-1.5">
-                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap border ${
-                          driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
-                        }`}>
+                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap border ${driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
                           {driveCount} di Drive
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleSyncPhotosCount(event._id)}
-                          disabled={syncingId === event._id}
-                          className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100 transition-all focus:outline-none"
-                          title="Sinkronkan jumlah foto dari Google Drive"
-                        >
-                          <RefreshCw 
-                            size={11} 
-                            className={syncingId === event._id ? "animate-spin text-blue-600" : ""} 
-                          />
+                        <button type="button" onClick={() => handleSyncPhotosCount(event._id)} disabled={syncingId === event._id} className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100 transition-all" title="Sinkronkan jumlah foto">
+                          <RefreshCw size={11} className={syncingId === event._id ? 'animate-spin text-blue-600' : ''} />
                         </button>
                       </div>
                     </div>
@@ -498,39 +247,29 @@ export default function AdminDashboard() {
                             ✅ Terindeks ({event.indexedPhotos.length}/{driveCount})
                           </span>
                         ) : (
-                          <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full">
-                            ⚠️ Belum Terindeks Wajah
-                          </span>
+                          <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠️ Belum Terindeks</span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Inline Background Scan Progress (only for the event currently being scanned) */}
-                  {bgScanJob && bgScanJob.eventId === event._id && (
+                  {/* Inline scan progress — no close button */}
+                  {(isScanning || scanDone) && (
                     <div className="mt-3 rounded-xl bg-slate-900 px-3 py-2.5 border border-slate-700">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-1.5">
-                          {bgScanJob.done
-                            ? <CheckCircle2 size={13} className="text-emerald-400" />
-                            : <Loader2 size={13} className="text-amber-400 animate-spin" />}
-                          <span className="text-[11px] font-bold text-white">
-                            {bgScanJob.done ? 'Scan Selesai!' : 'Scanning Latar Belakang...'}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => { bgStopRef.current = true; setBgScanJob(null); }}
-                          className="text-slate-500 hover:text-white transition-colors"
-                        >
-                          <X size={12} />
-                        </button>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        {scanDone
+                          ? <CheckCircle2 size={13} className="text-emerald-400" />
+                          : <Loader2 size={13} className="text-amber-400 animate-spin" />}
+                        <span className="text-[11px] font-bold text-white">
+                          {scanDone ? 'Scan Selesai!' : 'Scanning Latar Belakang...'}
+                        </span>
                       </div>
                       <div className="w-full bg-slate-700 rounded-full h-1.5">
                         <div
                           className="h-1.5 rounded-full transition-all duration-500"
                           style={{
                             width: bgScanJob.total > 0 ? `${Math.round((bgScanJob.progress / bgScanJob.total) * 100)}%` : '0%',
-                            background: bgScanJob.done ? '#34d399' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
+                            background: scanDone ? '#34d399' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
                           }}
                         />
                       </div>
@@ -540,68 +279,45 @@ export default function AdminDashboard() {
                           {bgScanJob.total > 0 ? Math.round((bgScanJob.progress / bgScanJob.total) * 100) : 0}%
                         </span>
                       </div>
-                      {bgScanJob.done && (
-                        <button onClick={() => setBgScanJob(null)} className="mt-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors">
-                          Tutup
-                        </button>
-                      )}
                     </div>
                   )}
 
-                  {/* Fully opaque button bar */}
-                  <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100 flex-wrap sm:flex-nowrap">
-                    {/* Toggle visibility - static read-only grey switch */}
-                    <div
-                      className="flex items-center gap-1.5 select-none cursor-default"
-                      title={event.hidden ? 'Status: Tersembunyi (Ubah lewat form Edit)' : 'Status: Tampil (Ubah lewat form Edit)'}
-                    >
-                      {/* Switch track */}
+                  {/* Button bar — icon-only on small, text on larger screens */}
+                  <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100">
+                    {/* Visibility switch (read-only) */}
+                    <div className="flex items-center gap-1.5 select-none cursor-default" title={event.hidden ? 'Tersembunyi' : 'Tampil'}>
                       <div className="relative w-8 h-[18px] rounded-full bg-slate-200 flex-shrink-0">
-                        {/* Switch knob */}
-                        <div className={`absolute top-[2px] w-3 h-3 rounded-full bg-slate-400 transition-all duration-300 ${
-                          event.hidden ? 'left-[2px]' : 'left-[18px]'
-                        }`} />
+                        <div className={`absolute top-[2px] w-3 h-3 rounded-full bg-slate-400 transition-all duration-300 ${event.hidden ? 'left-[2px]' : 'left-[18px]'}`} />
                       </div>
                       <span className="text-[10px] font-semibold text-slate-400 hidden xl:inline">
                         {event.hidden ? 'Sembunyi' : 'Tampil'}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <a
-                        href={`/gallery/${event.slug}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
-                        title="Buka halaman galeri publik"
-                      >
-                        <ExternalLink size={12} className="flex-shrink-0" />
+                    <div className="flex items-center gap-1">
+                      <a href={`/gallery/${event.slug}`} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
+                        title="Buka halaman galeri">
+                        <ExternalLink size={13} className="flex-shrink-0" />
                         <span className="hidden xl:inline">Buka</span>
                       </a>
-                      <a
-                        href={`/admin/scan/${event.slug}`}
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
-                        title="Scan Wajah AI"
-                      >
-                        <Cpu size={12} className="flex-shrink-0" />
-                        <span className="hidden xl:inline">Scan Wajah</span>
-                        <span className="hidden sm:inline xl:hidden">Scan</span>
+                      <a href={`/admin/scan/${event.slug}`}
+                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
+                        title="Scan Wajah AI">
+                        <Cpu size={13} className="flex-shrink-0" />
+                        <span className="hidden xl:inline">Scan</span>
                       </a>
-                      <button 
-                        onClick={() => startEdit(event)} 
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
-                        title="Ubah Data Event"
-                      >
-                        <Pencil size={12} className="flex-shrink-0" />
-                        <span className="hidden sm:inline">Ubah</span>
+                      <button onClick={() => startEdit(event)}
+                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
+                        title="Ubah Data Event">
+                        <Pencil size={13} className="flex-shrink-0" />
+                        <span className="hidden xl:inline">Ubah</span>
                       </button>
-                      <button 
-                        onClick={() => handleDelete(event._id)} 
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-all"
-                        title="Hapus Kategori"
-                      >
-                        <Trash2 size={12} className="flex-shrink-0" />
-                        <span className="hidden sm:inline">Hapus</span>
+                      <button onClick={() => handleDelete(event._id)}
+                        className="flex items-center justify-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-all"
+                        title="Hapus Kategori">
+                        <Trash2 size={13} className="flex-shrink-0" />
+                        <span className="hidden xl:inline">Hapus</span>
                       </button>
                     </div>
                   </div>
@@ -610,7 +326,7 @@ export default function AdminDashboard() {
             })}
           </div>
         ) : (
-          /* List View Mode (Table format) */
+          /* List View */
           <div className="overflow-x-auto border border-slate-200 rounded-xl">
             <table className="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
               <thead className="bg-slate-50 text-slate-700 font-semibold uppercase text-[10px]">
@@ -627,102 +343,59 @@ export default function AdminDashboard() {
                 {filteredEvents.map((event) => {
                   const driveCount = event.drivePhotosCount || 0;
                   return (
-                    <tr
-                      key={event._id}
-                      className={`hover:bg-slate-50/55 transition-colors ${
-                        editingId === event._id ? 'bg-amber-50/20' : ''
-                      }`}
-                    >
+                    <tr key={event._id} className={`hover:bg-slate-50/55 transition-colors ${editingId === event._id ? 'bg-amber-50/20' : ''}`}>
                       <td className={`px-6 py-4 transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         <div className="font-bold text-slate-900">{event.title}</div>
                         <div className="text-slate-500 text-xs mt-0.5 line-clamp-1 max-w-sm">{event.description || 'Tidak ada deskripsi.'}</div>
+                        {bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done && (
+                          <div className="mt-1 flex items-center gap-1.5">
+                            <Loader2 size={10} className="text-amber-500 animate-spin" />
+                            <span className="text-[10px] text-amber-600 font-semibold">
+                              Scanning {bgScanJob.progress}/{bgScanJob.total}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap text-slate-600 font-medium transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         {new Date(event.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         <div className="flex items-center gap-1.5">
-                          <span className={`font-bold px-2 py-0.5 rounded border text-[11px] ${
-                            driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
-                          }`}>
-                            {driveCount} Foto
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleSyncPhotosCount(event._id)}
-                            disabled={syncingId === event._id}
-                            className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100 transition-all focus:outline-none"
-                            title="Sinkronkan jumlah foto dari Google Drive"
-                          >
-                            <RefreshCw 
-                              size={11} 
-                              className={syncingId === event._id ? "animate-spin text-blue-600" : ""} 
-                            />
+                          <span className={`font-bold px-2 py-0.5 rounded border text-[11px] ${driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>{driveCount} Foto</span>
+                          <button type="button" onClick={() => handleSyncPhotosCount(event._id)} disabled={syncingId === event._id} className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100 transition-all" title="Sinkronkan">
+                            <RefreshCw size={11} className={syncingId === event._id ? 'animate-spin text-blue-600' : ''} />
                           </button>
                         </div>
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         {event.indexedPhotos && event.indexedPhotos.length > 0 ? (
-                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
-                            ✅ Terindeks ({event.indexedPhotos.length})
-                          </span>
+                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">✅ Terindeks ({event.indexedPhotos.length})</span>
                         ) : (
-                          <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
-                            ⚠️ Belum Scan
-                          </span>
+                          <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">⚠️ Belum Scan</span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {/* Toggle visibility - static read-only grey switch */}
-                        <div
-                          className="flex items-center gap-2 select-none cursor-default"
-                          title={event.hidden ? 'Status: Tersembunyi (Ubah lewat form Edit)' : 'Status: Tampil (Ubah lewat form Edit)'}
-                        >
+                        <div className="flex items-center gap-2 select-none cursor-default" title={event.hidden ? 'Tersembunyi' : 'Tampil'}>
                           <div className="relative w-10 h-[22px] rounded-full bg-slate-200">
-                            <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-slate-400 transition-all duration-300 ${
-                              event.hidden ? 'left-[3px]' : 'left-[21px]'
-                            }`} />
+                            <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-slate-400 transition-all duration-300 ${event.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
                           </div>
-                          <span className="text-[11px] font-semibold text-slate-400">
-                            {event.hidden ? 'Sembunyi' : 'Tampil'}
-                          </span>
+                          <span className="text-[11px] font-semibold text-slate-400">{event.hidden ? 'Sembunyi' : 'Tampil'}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <a
-                            href={`/gallery/${event.slug}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
-                            title="Buka halaman galeri publik"
-                          >
-                            <ExternalLink size={12} />
-                          </a>
-                          <a
-                            href={`/admin/scan/${event.slug}`}
-                            className="inline-flex items-center gap-1 bg-emerald-700 text-white hover:bg-emerald-600 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
-                            title="Scan Wajah"
-                          >
-                            <Cpu size={12} className="flex-shrink-0" />
-                            <span className="hidden sm:inline">Scan</span>
-                          </a>
-                          <button
-                            onClick={() => startEdit(event)}
-                            className="inline-flex items-center gap-1 bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
-                            title="Ubah"
-                          >
-                            <Pencil size={12} className="flex-shrink-0" />
-                            <span className="hidden sm:inline">Ubah</span>
-                          </button>
-                          <button
-                            onClick={() => handleDelete(event._id)}
-                            className="inline-flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
-                            title="Hapus"
-                          >
-                            <Trash2 size={12} className="flex-shrink-0" />
-                            <span className="hidden sm:inline">Hapus</span>
-                          </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <a href={`/gallery/${event.slug}`} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center p-1.5 bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 rounded text-xs transition-colors"
+                            title="Buka galeri publik"><ExternalLink size={12} /></a>
+                          <a href={`/admin/scan/${event.slug}`}
+                            className="inline-flex items-center justify-center p-1.5 bg-emerald-700 text-white hover:bg-emerald-600 rounded text-xs transition-colors"
+                            title="Scan Wajah"><Cpu size={12} /></a>
+                          <button onClick={() => startEdit(event)}
+                            className="inline-flex items-center justify-center p-1.5 bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 rounded text-xs transition-colors"
+                            title="Ubah"><Pencil size={12} /></button>
+                          <button onClick={() => handleDelete(event._id)}
+                            className="inline-flex items-center justify-center p-1.5 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 rounded text-xs transition-colors"
+                            title="Hapus"><Trash2 size={12} /></button>
                         </div>
                       </td>
                     </tr>
@@ -734,248 +407,110 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* Edit Modal (Dialog Pop-up Window) */}
+      {/* Edit Modal */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
-            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
               <h3 className="font-bold text-slate-800 flex items-center gap-2 text-base">
-                <Pencil size={16} className="text-amber-600 animate-pulse" />
-                Ubah Informasi Event Camping
+                <Pencil size={16} className="text-amber-600 animate-pulse" /> Ubah Informasi Event Camping
               </h3>
-              <button 
-                onClick={cancelEdit}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
-              >
-                <XCircle size={20} />
-              </button>
+              <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"><XCircle size={20} /></button>
             </div>
-
-            {/* Body Form */}
             <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Event Camping</label>
-                  <input 
-                    type="text" 
-                    value={editForm.title} 
-                    onChange={handleEditTitleChange} 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
-                    placeholder="Contoh: Camping JC Camporee" 
-                    required 
-                  />
+                  <input type="text" value={editForm.title} onChange={handleEditTitleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" placeholder="Contoh: Camping JC Camporee" required />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1">URL Slug (Terkunci Otomatis)</label>
-                  <input 
-                    type="text" 
-                    value={editForm.slug} 
-                    disabled 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" 
-                    placeholder="Terisi otomatis..." 
-                    required 
-                  />
+                  <input type="text" value={editForm.slug} disabled className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" required />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">ID Folder Google Drive</label>
-                  <input 
-                    type="text" 
-                    value={editForm.driveFolderId} 
-                    onChange={(e) => setEditForm({...editForm, driveFolderId: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
-                    placeholder="Masukkan Kode Folder ID" 
-                    required 
-                  />
+                  <input type="text" value={editForm.driveFolderId} onChange={(e) => setEditForm({...editForm, driveFolderId: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" required />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kegiatan</label>
-                  <input 
-                    type="date" 
-                    value={editForm.date} 
-                    onChange={(e) => setEditForm({...editForm, date: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
-                    required 
-                  />
+                  <input type="date" value={editForm.date} onChange={(e) => setEditForm({...editForm, date: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" required />
                 </div>
               </div>
-
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
-                <textarea 
-                  value={editForm.description} 
-                  onChange={(e) => setEditForm({...editForm, description: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
-                  rows="3" 
-                  placeholder="Tuliskan info keseruan di sini..."
-                ></textarea>
+                <textarea value={editForm.description} onChange={(e) => setEditForm({...editForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" rows="3" placeholder="Tuliskan info keseruan di sini..." />
               </div>
-
-              {/* Form Edit Visibility Switch */}
               <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
                 <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
-                <button
-                  type="button"
-                  onClick={() => setEditForm({ ...editForm, hidden: !editForm.hidden })}
-                  className="flex items-center gap-2 group focus:outline-none"
-                >
-                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
-                    editForm.hidden ? 'bg-slate-300' : 'bg-emerald-500'
-                  }`}>
-                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
-                      editForm.hidden ? 'left-[3px]' : 'left-[21px]'
-                    }`} />
+                <button type="button" onClick={() => setEditForm({ ...editForm, hidden: !editForm.hidden })} className="flex items-center gap-2 group focus:outline-none">
+                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${editForm.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${editForm.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
                   </div>
-                  <span className={`text-[11px] font-semibold transition-colors ${
-                    editForm.hidden ? 'text-slate-500 font-normal' : 'text-emerald-700 font-bold'
-                  }`}>
+                  <span className={`text-[11px] font-semibold transition-colors ${editForm.hidden ? 'text-slate-500' : 'text-emerald-700 font-bold'}`}>
                     {editForm.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
                   </span>
                 </button>
               </div>
-
-              {/* Actions Footer */}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button 
-                  type="button" 
-                  onClick={cancelEdit} 
-                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"
-                >
-                  <XCircle size={16} /> Batal
-                </button>
-                <button 
-                  type="submit" 
-                  className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors"
-                >
-                  Perbarui Data Event
-                </button>
+                <button type="button" onClick={cancelEdit} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"><XCircle size={16} /> Batal</button>
+                <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors">Perbarui Data Event</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Tambah Modal (Dialog Pop-up Window) */}
+      {/* Tambah Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
-            {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
               <h3 className="font-bold text-slate-800 flex items-center gap-2 text-base">
-                <PlusCircle size={16} className="text-emerald-600 animate-pulse" />
-                Tambah Event Camping Baru
+                <PlusCircle size={16} className="text-emerald-600 animate-pulse" /> Tambah Event Camping Baru
               </h3>
-              <button 
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
-              >
-                <XCircle size={20} />
-              </button>
+              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"><XCircle size={20} /></button>
             </div>
-
-            {/* Body Form */}
             <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Event Camping</label>
-                  <input 
-                    type="text" 
-                    value={form.title} 
-                    onChange={handleTitleChange} 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
-                    placeholder="Contoh: Camping JC Camporee" 
-                    required 
-                  />
+                  <input type="text" value={form.title} onChange={handleTitleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" placeholder="Contoh: Camping JC Camporee" required />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1">URL Slug (Terkunci Otomatis)</label>
-                  <input 
-                    type="text" 
-                    value={form.slug} 
-                    disabled 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" 
-                    placeholder="Terisi otomatis..." 
-                    required 
-                  />
+                  <input type="text" value={form.slug} disabled className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" required />
                 </div>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">ID Folder Google Drive</label>
-                  <input 
-                    type="text" 
-                    value={form.driveFolderId} 
-                    onChange={(e) => setForm({...form, driveFolderId: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
-                    placeholder="Masukkan Kode Folder ID" 
-                    required 
-                  />
+                  <input type="text" value={form.driveFolderId} onChange={(e) => setForm({...form, driveFolderId: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" placeholder="Masukkan Kode Folder ID" required />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kegiatan</label>
-                  <input 
-                    type="date" 
-                    value={form.date} 
-                    onChange={(e) => setForm({...form, date: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
-                    required 
-                  />
+                  <input type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" required />
                 </div>
               </div>
-
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
-                <textarea 
-                  value={form.description} 
-                  onChange={(e) => setForm({...form, description: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
-                  rows="3" 
-                  placeholder="Tuliskan info keseruan di sini..."
-                ></textarea>
+                <textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" rows="3" placeholder="Tuliskan info keseruan di sini..." />
               </div>
-
-              {/* Form Add Visibility Switch */}
               <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
                 <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, hidden: !form.hidden })}
-                  className="flex items-center gap-2 group focus:outline-none"
-                >
-                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
-                    form.hidden ? 'bg-slate-300' : 'bg-emerald-500'
-                  }`}>
-                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
-                      form.hidden ? 'left-[3px]' : 'left-[21px]'
-                    }`} />
+                <button type="button" onClick={() => setForm({ ...form, hidden: !form.hidden })} className="flex items-center gap-2 group focus:outline-none">
+                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${form.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${form.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
                   </div>
-                  <span className={`text-[11px] font-semibold transition-colors ${
-                    form.hidden ? 'text-slate-500 font-normal' : 'text-emerald-700 font-bold'
-                  }`}>
+                  <span className={`text-[11px] font-semibold transition-colors ${form.hidden ? 'text-slate-500' : 'text-emerald-700 font-bold'}`}>
                     {form.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
                   </span>
                 </button>
               </div>
-
-              {/* Actions Footer */}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button 
-                  type="button" 
-                  onClick={() => setIsAddModalOpen(false)} 
-                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"
-                >
-                  <XCircle size={16} /> Batal
-                </button>
-                <button 
-                  type="submit" 
-                  className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors"
-                >
-                  Simpan & Aktifkan Galeri
-                </button>
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"><XCircle size={16} /> Batal</button>
+                <button type="submit" className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors">Simpan &amp; Aktifkan Galeri</button>
               </div>
             </form>
           </div>
@@ -984,4 +519,3 @@ export default function AdminDashboard() {
     </div>
   );
 }
-
