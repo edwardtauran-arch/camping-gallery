@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Script from 'next/script';
-import { Loader2, CheckCircle2, Brain } from 'lucide-react';
+import { Loader2, CheckCircle2 } from 'lucide-react';
 
 // BroadcastChannel key for sharing scan progress with dashboard
 export const SCAN_CHANNEL = 'bg-scan-progress';
@@ -191,4 +191,5 @@ export default function AdminLayout({ children }) {
         </div>
       )}
     </>
+  );
 }
