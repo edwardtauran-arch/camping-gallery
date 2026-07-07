@@ -18,6 +18,13 @@ export default function AdminDashboard() {
 
   // Receive scan progress from admin layout via BroadcastChannel
   const [bgScanJob, setBgScanJob] = useState(null);
+  const [realtimeCounts, setRealtimeCounts] = useState({});
+  const scanStartsRef = useRef({});
+  const eventsRef = useRef(events);
+
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   useEffect(() => {
     const channel = new BroadcastChannel('bg-scan-progress');
@@ -27,7 +34,30 @@ export default function AdminDashboard() {
         fetchEvents();
       } else {
         setBgScanJob(data);
-        if (data.done) fetchEvents();
+
+        if (data.eventId && data.progress !== undefined) {
+          // Initialize starting DB count if not present
+          if (scanStartsRef.current[data.eventId] === undefined) {
+            const eventObj = eventsRef.current.find(ev => ev._id === data.eventId);
+            scanStartsRef.current[data.eventId] = eventObj?.indexedPhotos ? eventObj.indexedPhotos.length : 0;
+          }
+          
+          const currentCount = scanStartsRef.current[data.eventId] + data.progress;
+          setRealtimeCounts(prev => ({
+            ...prev,
+            [data.eventId]: currentCount
+          }));
+        }
+
+        if (data.done) {
+          delete scanStartsRef.current[data.eventId];
+          setRealtimeCounts(prev => {
+            const copy = { ...prev };
+            delete copy[data.eventId];
+            return copy;
+          });
+          fetchEvents();
+        }
       }
     };
     return () => channel.close();
@@ -208,6 +238,9 @@ export default function AdminDashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredEvents.map((event) => {
               const driveCount = event.drivePhotosCount || 0;
+              const currentIndexedCount = realtimeCounts[event._id] !== undefined
+                ? realtimeCounts[event._id]
+                : (event.indexedPhotos ? event.indexedPhotos.length : 0);
               const isScanning = bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done;
               const scanDone = bgScanJob && bgScanJob.eventId === event._id && bgScanJob.done;
               return (
@@ -242,9 +275,9 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className="font-semibold text-slate-400">Status AI:</span>
-                        {event.indexedPhotos && event.indexedPhotos.length > 0 ? (
+                        {currentIndexedCount > 0 ? (
                           <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full">
-                            ✅ Terindeks ({event.indexedPhotos.length}/{driveCount})
+                            ✅ Terindeks ({currentIndexedCount}/{driveCount})
                           </span>
                         ) : (
                           <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠️ Belum Terindeks</span>
@@ -338,6 +371,9 @@ export default function AdminDashboard() {
               <tbody className="divide-y divide-slate-200 bg-white">
                 {filteredEvents.map((event) => {
                   const driveCount = event.drivePhotosCount || 0;
+                  const currentIndexedCount = realtimeCounts[event._id] !== undefined
+                    ? realtimeCounts[event._id]
+                    : (event.indexedPhotos ? event.indexedPhotos.length : 0);
                   return (
                     <tr key={event._id} className={`hover:bg-slate-50/55 transition-colors ${editingId === event._id ? 'bg-amber-50/20' : ''}`}>
                       <td className={`px-6 py-4 transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
@@ -364,8 +400,8 @@ export default function AdminDashboard() {
                         </div>
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
-                        {event.indexedPhotos && event.indexedPhotos.length > 0 ? (
-                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">✅ Terindeks ({event.indexedPhotos.length})</span>
+                        {currentIndexedCount > 0 ? (
+                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">✅ Terindeks ({currentIndexedCount})</span>
                         ) : (
                           <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">⚠️ Belum Scan</span>
                         )}
