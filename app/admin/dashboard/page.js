@@ -75,10 +75,16 @@ export default function AdminDashboard() {
     });
 
     if (res.ok) {
-      alert('✅ Event Camping Baru Berhasil Ditambahkan!');
+      const json = await res.json();
+      const newEvent = json.data;
+
       setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
       setIsAddModalOpen(false); // Close add modal
       fetchEvents();
+
+      if (confirm(`✅ Event "${newEvent.title}" berhasil ditambahkan!\n\nApakah Anda ingin langsung memulai pemindaian (scan) wajah AI untuk foto-foto di folder Drive event ini?`)) {
+        router.push(`/admin/scan/${newEvent.slug}`);
+      }
     } else {
       alert('❌ Gagal menambahkan event.');
     }
