@@ -7,8 +7,10 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [events, setEvents] = useState([]);
   const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
 
@@ -49,35 +51,57 @@ export default function AdminDashboard() {
     setForm({
       ...form,
       title: titleValue,
-      slug: editingId ? form.slug : slugify(titleValue)
+      slug: slugify(titleValue)
     });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const url = '/api/admin/events';
-    const method = editingId ? 'PUT' : 'POST';
-    const payload = editingId ? { id: editingId, ...form } : form;
+  const handleEditTitleChange = (e) => {
+    const titleValue = e.target.value;
+    setEditForm({
+      ...editForm,
+      title: titleValue,
+      slug: slugify(titleValue)
+    });
+  };
 
-    const res = await fetch(url, {
-      method: method,
+  const handleAddSubmit = async (e) => {
+    e.preventDefault();
+    const res = await fetch('/api/admin/events', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(form)
     });
 
     if (res.ok) {
-      alert(editingId ? '✅ Data Event Berhasil Diperbarui!' : '✅ Event Camping Baru Berhasil Ditambahkan!');
+      alert('✅ Event Camping Baru Berhasil Ditambahkan!');
+      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+      fetchEvents();
+    } else {
+      alert('❌ Gagal menambahkan event.');
+    }
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    const res = await fetch('/api/admin/events', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingId, ...editForm })
+    });
+
+    if (res.ok) {
+      alert('✅ Data Event Berhasil Diperbarui!');
       cancelEdit();
       fetchEvents();
     } else {
-      alert('❌ Gagal memproses data.');
+      alert('❌ Gagal memperbarui data.');
     }
   };
 
   const startEdit = (event) => {
     setEditingId(event._id);
     const formattedDate = event.date ? new Date(event.date).toISOString().split('T')[0] : '';
-    setForm({
+    setEditForm({
       title: event.title,
       slug: event.slug,
       driveFolderId: event.driveFolderId,
@@ -85,12 +109,13 @@ export default function AdminDashboard() {
       description: event.description || '',
       hidden: event.hidden || false
     });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setIsEditModalOpen(true);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+    setIsEditModalOpen(false);
+    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
   };
 
   const handleDelete = async (id) => {
@@ -159,13 +184,13 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Form Tambah / Edit */}
-      <div className={`p-6 rounded-xl border shadow-sm max-w-2xl transition-colors duration-200 ${editingId ? 'bg-amber-50/40 border-amber-200' : 'bg-white border-slate-200'}`}>
+      {/* Form Tambah Kategori Baru (Selalu Bersih & Terbuka) */}
+      <div className="p-6 rounded-xl border border-slate-200 bg-white shadow-sm max-w-2xl">
         <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <PlusCircle size={18} className={editingId ? "text-amber-600" : "text-emerald-600"} /> 
-          {editingId ? 'Ubah Informasi Event Camping' : 'Tambah Event Camping Baru'}
+          <PlusCircle size={18} className="text-emerald-600" /> 
+          Tambah Event Camping Baru
         </h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleAddSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Nama Event Camping</label>
@@ -173,7 +198,6 @@ export default function AdminDashboard() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">URL Slug (Terkunci Otomatis)</label>
-              {/* UPDATE: Menambahkan atribut disabled dan styling abu-abu terlarang */}
               <input 
                 type="text" 
                 value={form.slug} 
@@ -227,14 +251,9 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex gap-3">
-            <button type="submit" className={`font-medium text-sm py-2 px-6 rounded-lg shadow transition-colors text-white ${editingId ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-700 hover:bg-emerald-600'}`}>
-              {editingId ? 'Perbarui Data Event' : 'Simpan & Aktifkan Galeri foto'}
+            <button type="submit" className="font-medium text-sm py-2 px-6 rounded-lg shadow transition-colors text-white bg-emerald-700 hover:bg-emerald-600">
+              Simpan & Aktifkan Galeri foto
             </button>
-            {editingId && (
-              <button type="button" onClick={cancelEdit} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors">
-                <XCircle size={16} /> Batal Edit
-              </button>
-            )}
           </div>
         </form>
       </div>
@@ -311,15 +330,10 @@ export default function AdminDashboard() {
               return (
                 <div 
                   key={event._id} 
-                  className={`rounded-xl border p-5 flex flex-col justify-between shadow-sm transition-all duration-200 hover:shadow-md ${
-                    event.hidden
-                      ? 'bg-slate-50/80 border-slate-200 opacity-70'
-                      : editingId === event._id 
-                        ? 'bg-amber-50/10 border-amber-400 ring-1 ring-amber-400' 
-                        : 'bg-white border-slate-200 hover:-translate-y-0.5'
-                  }`}
+                  className={`rounded-xl border p-5 flex flex-col justify-between shadow-sm transition-all duration-200 hover:shadow-md bg-white border-slate-200 hover:-translate-y-0.5`}
                 >
-                  <div className="space-y-3">
+                  {/* Faded content if event is hidden (action buttons below are NOT faded) */}
+                  <div className={`space-y-3 transition-opacity ${event.hidden ? 'opacity-60' : ''}`}>
                     <div className="flex justify-between items-start gap-2">
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">{event.title}</h3>
                       <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap border ${
@@ -359,6 +373,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
+                  {/* Fully opaque button bar */}
                   <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100">
                     {/* Toggle visibility - static read-only grey switch */}
                     <div
@@ -387,21 +402,17 @@ export default function AdminDashboard() {
                       </a>
                       <button 
                         onClick={() => startEdit(event)} 
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                          editingId === event._id 
-                            ? 'bg-amber-100 text-amber-800' 
-                            : 'bg-slate-50 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
-                        }`}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-colors"
                         title="Ubah Data Event"
                       >
-                        <Pencil size={14} /> Ubah
+                        <Pencil size={12} /> Ubah
                       </button>
                       <button 
                         onClick={() => handleDelete(event._id)} 
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 text-slate-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-colors"
                         title="Hapus Kategori"
                       >
-                        <Trash2 size={14} /> Hapus
+                        <Trash2 size={12} /> Hapus
                       </button>
                     </div>
                   </div>
@@ -430,24 +441,24 @@ export default function AdminDashboard() {
                     <tr
                       key={event._id}
                       className={`hover:bg-slate-50/55 transition-colors ${
-                        event.hidden ? 'opacity-70 bg-slate-50/40' : ''
-                      } ${editingId === event._id ? 'bg-amber-50/20' : ''}`}
+                        editingId === event._id ? 'bg-amber-50/20' : ''
+                      }`}
                     >
-                      <td className="px-6 py-4">
+                      <td className={`px-6 py-4 transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         <div className="font-bold text-slate-900">{event.title}</div>
                         <div className="text-slate-500 text-xs mt-0.5 line-clamp-1 max-w-sm">{event.description || 'Tidak ada deskripsi.'}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-slate-600 font-medium">
+                      <td className={`px-6 py-4 whitespace-nowrap text-slate-600 font-medium transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         {new Date(event.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         <span className={`font-bold px-2 py-0.5 rounded border text-[11px] ${
                           driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
                         }`}>
                           {driveCount} Foto
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         {event.indexedPhotos && event.indexedPhotos.length > 0 ? (
                           <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
                             ✅ Terindeks ({event.indexedPhotos.length})
@@ -478,19 +489,19 @@ export default function AdminDashboard() {
                         <div className="flex items-center justify-end gap-2">
                           <a
                             href={`/admin/scan/${event.slug}`}
-                            className="inline-flex items-center gap-1 bg-emerald-700 text-white hover:bg-emerald-600 font-semibold px-2 py-1 rounded text-xs transition-colors"
+                            className="inline-flex items-center gap-1 bg-emerald-700 text-white hover:bg-emerald-600 font-semibold px-2.5 py-1.5 rounded text-xs transition-colors"
                           >
                             <Cpu size={12} /> Scan
                           </a>
                           <button
                             onClick={() => startEdit(event)}
-                            className="bg-slate-100 hover:bg-amber-100 hover:text-amber-800 text-slate-600 px-2 py-1 rounded text-xs font-semibold transition-colors"
+                            className="bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 font-semibold px-2.5 py-1.5 rounded text-xs transition-colors"
                           >
                             Ubah
                           </button>
                           <button
                             onClick={() => handleDelete(event._id)}
-                            className="bg-slate-100 hover:bg-red-100 hover:text-red-700 text-slate-600 px-2 py-1 rounded text-xs font-semibold transition-colors"
+                            className="bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded text-xs transition-colors"
                           >
                             Hapus
                           </button>
@@ -504,6 +515,131 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Edit Modal (Dialog Pop-up Window) */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2 text-base">
+                <Pencil size={16} className="text-amber-600 animate-pulse" />
+                Ubah Informasi Event Camping
+              </h3>
+              <button 
+                onClick={cancelEdit}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            {/* Body Form */}
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Event Camping</label>
+                  <input 
+                    type="text" 
+                    value={editForm.title} 
+                    onChange={handleEditTitleChange} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
+                    placeholder="Contoh: Camping JC Camporee" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">URL Slug (Terkunci Otomatis)</label>
+                  <input 
+                    type="text" 
+                    value={editForm.slug} 
+                    disabled 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" 
+                    placeholder="Terisi otomatis..." 
+                    required 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">ID Folder Google Drive</label>
+                  <input 
+                    type="text" 
+                    value={editForm.driveFolderId} 
+                    onChange={(e) => setEditForm({...editForm, driveFolderId: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
+                    placeholder="Masukkan Kode Folder ID" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kegiatan</label>
+                  <input 
+                    type="date" 
+                    value={editForm.date} 
+                    onChange={(e) => setEditForm({...editForm, date: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
+                    required 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
+                <textarea 
+                  value={editForm.description} 
+                  onChange={(e) => setEditForm({...editForm, description: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" 
+                  rows="3" 
+                  placeholder="Tuliskan info keseruan di sini..."
+                ></textarea>
+              </div>
+
+              {/* Form Edit Visibility Switch */}
+              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
+                <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
+                <button
+                  type="button"
+                  onClick={() => setEditForm({ ...editForm, hidden: !editForm.hidden })}
+                  className="flex items-center gap-2 group focus:outline-none"
+                >
+                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
+                    editForm.hidden ? 'bg-slate-300' : 'bg-emerald-500'
+                  }`}>
+                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
+                      editForm.hidden ? 'left-[3px]' : 'left-[21px]'
+                    }`} />
+                  </div>
+                  <span className={`text-[11px] font-semibold transition-colors ${
+                    editForm.hidden ? 'text-slate-500 font-normal' : 'text-emerald-700 font-bold'
+                  }`}>
+                    {editForm.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
+                  </span>
+                </button>
+              </div>
+
+              {/* Actions Footer */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={cancelEdit} 
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"
+                >
+                  <XCircle size={16} /> Batal
+                </button>
+                <button 
+                  type="submit" 
+                  className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors"
+                >
+                  Perbarui Data Event
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
