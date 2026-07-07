@@ -1,7 +1,8 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw } from 'lucide-react';
+import Script from 'next/script';
+import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Brain, Loader2, CheckCircle2, X } from 'lucide-react';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -15,6 +16,14 @@ export default function AdminDashboard() {
   const [syncingId, setSyncingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+
+  // === Background Auto-Scan State ===
+  const [faceApiReady, setFaceApiReady] = useState(false);
+  const [bgScanJob, setBgScanJob] = useState(null); // { eventId, eventTitle, progress, total, done, error }
+  const [bgScanQueue, setBgScanQueue] = useState([]); // list of events pending scan
+  const bgStopRef = useRef(false);
+  const bgScanRunning = useRef(false);
+  const faceApiLoadingRef = useRef(false);
 
   const filteredEvents = events.filter(event => 
     event.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -66,6 +75,137 @@ export default function AdminDashboard() {
     });
   };
 
+  // === Background Scan Core Logic ===
+  const loadFaceApiModels = useCallback(async () => {
+    if (faceApiLoadingRef.current || faceApiReady) return;
+    faceApiLoadingRef.current = true;
+    try {
+      const faceapi = window.faceapi;
+      if (!faceapi) return;
+      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+      await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+      await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+      setFaceApiReady(true);
+    } catch (err) {
+      console.error('[BgScan] Gagal load model:', err);
+      faceApiLoadingRef.current = false;
+    }
+  }, [faceApiReady]);
+
+  const runBackgroundScan = useCallback(async (event, photoList) => {
+    if (bgScanRunning.current) return;
+    bgScanRunning.current = true;
+    bgStopRef.current = false;
+
+    const faceapi = window.faceapi;
+    if (!faceapi || !faceapi.nets.tinyFaceDetector.params) {
+      bgScanRunning.current = false;
+      return;
+    }
+
+    const alreadyIndexedIds = new Set((event.indexedPhotos || []).map(p => p.id));
+    const toScan = photoList.filter(p => !alreadyIndexedIds.has(p.id));
+    if (toScan.length === 0) { bgScanRunning.current = false; return; }
+
+    const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+    let batch = [];
+    let done = 0;
+
+    setBgScanJob({ eventId: event._id, eventTitle: event.title, progress: 0, total: toScan.length, done: false, error: null });
+
+    for (let i = 0; i < toScan.length; i++) {
+      if (bgStopRef.current) break;
+
+      const photo = toScan[i];
+      try {
+        const proxyUrl = `/api/proxy-image?id=${photo.id}&sz=w400`;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = proxyUrl;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = () => reject(new Error('Load failed'));
+        });
+
+        const detections = await faceapi
+          .detectAllFaces(img, detectorOptions)
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+
+        const faceDescriptors = detections.map(d => Array.from(d.descriptor));
+        batch.push({ id: photo.id, name: photo.name, thumbnailLink: photo.thumbnailLink, webContentLink: photo.webContentLink, faceDescriptors });
+      } catch (_) {
+        batch.push({ id: photo.id, name: photo.name, thumbnailLink: photo.thumbnailLink || '', webContentLink: photo.webContentLink || '', faceDescriptors: [] });
+      }
+
+      done++;
+      setBgScanJob(prev => prev ? { ...prev, progress: done } : prev);
+
+      // Save every 5 photos or at end
+      if (batch.length >= 5 || i === toScan.length - 1) {
+        try {
+          await fetch('/api/index-photos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventId: event._id, photos: batch }),
+          });
+          // Update the event's indexed count in local state
+          const savedBatch = [...batch];
+          setEvents(prev => prev.map(ev =>
+            ev._id === event._id
+              ? { ...ev, indexedPhotos: [...(ev.indexedPhotos || []), ...savedBatch] }
+              : ev
+          ));
+        } catch (err) {
+          console.error('[BgScan] Gagal simpan batch:', err);
+        }
+        batch = [];
+      }
+    }
+
+    bgScanRunning.current = false;
+    setBgScanJob(prev => prev ? { ...prev, done: true } : null);
+
+    // If queue has more events, start next
+    setBgScanQueue(q => {
+      if (q.length > 0) {
+        const [next, ...rest] = q;
+        // slight delay before next
+        setTimeout(() => triggerScanForEvent(next), 1500);
+        return rest;
+      }
+      return [];
+    });
+  }, []);
+
+  const triggerScanForEvent = useCallback(async (event) => {
+    // First fetch photos for this event from drive
+    try {
+      const res = await fetch(`/api/admin/events?slug=${event.slug}&photos=1`);
+      if (!res.ok) return;
+      const json = await res.json();
+      const photos = json.photos || [];
+      if (photos.length === 0) return;
+      await runBackgroundScan(event, photos);
+    } catch (err) {
+      console.error('[BgScan] Gagal ambil foto:', err);
+    }
+  }, [runBackgroundScan]);
+
+  // Auto-trigger when faceApi is ready: scan any event with unindexed photos
+  useEffect(() => {
+    if (!faceApiReady || bgScanRunning.current) return;
+    const needScan = events.filter(ev => {
+      const indexed = (ev.indexedPhotos || []).length;
+      const total = ev.drivePhotosCount || 0;
+      return total > 0 && indexed < total;
+    });
+    if (needScan.length === 0) return;
+    const [first, ...rest] = needScan;
+    setBgScanQueue(rest);
+    triggerScanForEvent(first);
+  }, [faceApiReady, events, triggerScanForEvent]);
+
   const handleAddSubmit = async (e) => {
     e.preventDefault();
     const res = await fetch('/api/admin/events', {
@@ -79,11 +219,11 @@ export default function AdminDashboard() {
       const newEvent = json.data;
 
       setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
-      setIsAddModalOpen(false); // Close add modal
-      fetchEvents();
-
-      if (confirm(`✅ Event "${newEvent.title}" berhasil ditambahkan!\n\nApakah Anda ingin langsung memulai pemindaian (scan) wajah AI untuk foto-foto di folder Drive event ini?`)) {
-        router.push(`/admin/scan/${newEvent.slug}`);
+      setIsAddModalOpen(false);
+      await fetchEvents();
+      // Auto-trigger background scan for the new event
+      if (faceApiReady && !bgScanRunning.current) {
+        setTimeout(() => triggerScanForEvent(newEvent), 800);
       }
     } else {
       alert('❌ Gagal menambahkan event.');
@@ -212,6 +352,15 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6 sm:space-y-8">
+      {/* Face-API Script — lazy load only when events need scanning */}
+      {events.some(ev => (ev.drivePhotosCount || 0) > (ev.indexedPhotos || []).length) && (
+        <Script
+          src="/js/face-api.js"
+          strategy="lazyOnload"
+          onLoad={() => loadFaceApiModels()}
+        />
+      )}
+
       {/* Top Navbar */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-wrap gap-3">
         <h1 className="text-lg sm:text-xl font-bold text-slate-900">🛠️ Panel Kontrol Admin</h1>
@@ -768,6 +917,80 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* === Floating Background Scan Progress Pill === */}
+      {bgScanJob && (
+        <div className="fixed bottom-6 left-6 z-[200] max-w-xs w-full">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 pt-3 pb-2">
+              <div className="flex items-center gap-2">
+                {bgScanJob.done ? (
+                  <CheckCircle2 size={16} className="text-emerald-400" />
+                ) : (
+                  <Loader2 size={16} className="text-amber-400 animate-spin" />
+                )}
+                <span className="text-xs font-bold text-white">
+                  {bgScanJob.done ? 'Scan Selesai' : 'Scanning Latar Belakang'}
+                </span>
+              </div>
+              <button
+                onClick={() => { bgStopRef.current = true; setBgScanJob(null); }}
+                className="text-slate-400 hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Event name */}
+            <div className="px-4 pb-1">
+              <p className="text-xs text-slate-300 truncate">{bgScanJob.eventTitle}</p>
+            </div>
+
+            {/* Progress bar */}
+            <div className="px-4 pb-2">
+              <div className="w-full bg-slate-700 rounded-full h-1.5">
+                <div
+                  className="h-1.5 rounded-full transition-all duration-300"
+                  style={{
+                    width: bgScanJob.total > 0 ? `${Math.round((bgScanJob.progress / bgScanJob.total) * 100)}%` : '0%',
+                    background: bgScanJob.done ? '#34d399' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
+                  }}
+                />
+              </div>
+              <div className="flex justify-between mt-1">
+                <span className="text-[10px] text-slate-400">
+                  {bgScanJob.progress} / {bgScanJob.total} foto
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {bgScanJob.total > 0 ? Math.round((bgScanJob.progress / bgScanJob.total) * 100) : 0}%
+                </span>
+              </div>
+            </div>
+
+            {/* Queue info */}
+            {bgScanQueue.length > 0 && !bgScanJob.done && (
+              <div className="px-4 pb-3">
+                <p className="text-[10px] text-slate-500">
+                  +{bgScanQueue.length} event lain menunggu antrian
+                </p>
+              </div>
+            )}
+
+            {/* Done state auto-dismiss button */}
+            {bgScanJob.done && (
+              <div className="px-4 pb-3">
+                <button
+                  onClick={() => setBgScanJob(null)}
+                  className="text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  Tutup notifikasi
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

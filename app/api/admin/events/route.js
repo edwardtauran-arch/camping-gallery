@@ -10,10 +10,27 @@ function isAdmin() {
   return session && session.value === 'authenticated';
 }
 
-export async function GET() {
+export async function GET(request) {
   if (!isAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await dbConnect();
   try {
+    const { searchParams } = new URL(request.url);
+    const slug = searchParams.get('slug');
+    const fetchPhotos = searchParams.get('photos') === '1';
+
+    if (slug && fetchPhotos) {
+      // Background scan: return event + its Google Drive photos
+      const event = await Event.findOne({ slug });
+      if (!event) return NextResponse.json({ error: 'Event tidak ditemukan.' }, { status: 404 });
+      let photos = [];
+      try {
+        photos = await getPhotosFromFolder(event.driveFolderId);
+      } catch (e) {
+        console.error('[GET events photos] Gagal ambil foto drive:', e);
+      }
+      return NextResponse.json({ success: true, event, photos });
+    }
+
     const events = await Event.find({}).sort({ date: -1 });
     return NextResponse.json({ success: true, data: events });
   } catch (err) {
