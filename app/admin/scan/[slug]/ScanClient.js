@@ -128,6 +128,7 @@ export default function ScanClient({ event, initialPhotos }) {
 
         batch.push(indexedPhoto);
         sessionIndexed.push(indexedPhoto);
+        setIndexedPhotos(prev => [...prev, indexedPhoto]);
 
         setScanResults(prev => [
           {
@@ -147,7 +148,6 @@ export default function ScanClient({ event, initialPhotos }) {
             body: JSON.stringify({ eventId: event._id, photos: batch }),
           });
           if (!res.ok) throw new Error('Gagal menyimpan hasil scan ke database');
-          setIndexedPhotos(prev => [...prev, ...batch]);
           batch = [];
         }
 
