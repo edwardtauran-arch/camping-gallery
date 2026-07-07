@@ -15,18 +15,7 @@ export async function GET() {
   await dbConnect();
   try {
     const events = await Event.find({}).sort({ date: -1 });
-
-    const eventsWithDriveCount = await Promise.all(
-      events.map(async (event) => {
-        const photos = await getPhotosFromFolder(event.driveFolderId);
-        return {
-          ...event.toObject(),
-          drivePhotosCount: photos.length
-        };
-      })
-    );
-
-    return NextResponse.json({ success: true, data: eventsWithDriveCount });
+    return NextResponse.json({ success: true, data: events });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
   }
@@ -37,7 +26,17 @@ export async function POST(request) {
   await dbConnect();
   try {
     const body = await request.json();
-    const newEvent = await Event.create(body);
+    
+    // Fetch Google Drive photo count once on creation
+    let drivePhotosCount = 0;
+    try {
+      const photos = await getPhotosFromFolder(body.driveFolderId);
+      drivePhotosCount = photos.length;
+    } catch (e) {
+      console.error("Gagal mendapatkan jumlah foto Google Drive saat POST:", e);
+    }
+
+    const newEvent = await Event.create({ ...body, drivePhotosCount });
     return NextResponse.json({ success: true, data: newEvent });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
@@ -52,9 +51,19 @@ export async function PUT(request) {
     const body = await request.json();
     console.log("[API EVENTS PUT] Received body:", body);
     const { id, title, slug, driveFolderId, date, description, hidden } = body;
+    
+    // Fetch Google Drive photo count once on update
+    let drivePhotosCount = 0;
+    try {
+      const photos = await getPhotosFromFolder(driveFolderId);
+      drivePhotosCount = photos.length;
+    } catch (e) {
+      console.error("Gagal mendapatkan jumlah foto Google Drive saat PUT:", e);
+    }
+
     const updatedEvent = await Event.findByIdAndUpdate(
       id,
-      { title, slug, driveFolderId, date, description, hidden: !!hidden },
+      { title, slug, driveFolderId, date, description, hidden: !!hidden, drivePhotosCount },
       { new: true } // Mengembalikan data terbaru setelah di-update
     );
     console.log("[API EVENTS PUT] Updated event in DB:", updatedEvent);
@@ -77,17 +86,27 @@ export async function DELETE(request) {
   }
 }
 
-// Toggle visibility (hidden/show)
+// Toggle visibility ATAU sinkronisasi jumlah foto
 export async function PATCH(request) {
   if (!isAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await dbConnect();
   try {
-    const { id } = await request.json();
+    const { id, action } = await request.json();
     const event = await Event.findById(id);
     if (!event) return NextResponse.json({ success: false, error: 'Event not found' }, { status: 404 });
-    event.hidden = !event.hidden;
-    await event.save();
-    return NextResponse.json({ success: true, data: { hidden: event.hidden } });
+
+    if (action === 'sync') {
+      // Sinkronisasi jumlah foto Google Drive on demand
+      const photos = await getPhotosFromFolder(event.driveFolderId);
+      event.drivePhotosCount = photos.length;
+      await event.save();
+      return NextResponse.json({ success: true, data: { drivePhotosCount: event.drivePhotosCount } });
+    } else {
+      // Toggle visibility
+      event.hidden = !event.hidden;
+      await event.save();
+      return NextResponse.json({ success: true, data: { hidden: event.hidden } });
+    }
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
   }

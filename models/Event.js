@@ -7,6 +7,7 @@ const EventSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   description: { type: String },
   hidden: { type: Boolean, default: false },
+  drivePhotosCount: { type: Number, default: 0 },
   // Tambahan untuk menyimpan koordinat wajah hasil scan AI
   indexedPhotos: [{
     id: String,

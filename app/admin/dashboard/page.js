@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List } from 'lucide-react';
+import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw } from 'lucide-react';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -12,6 +12,7 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [syncingId, setSyncingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
 
@@ -176,6 +177,33 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleSyncPhotosCount = async (id) => {
+    setSyncingId(id);
+    try {
+      const res = await fetch('/api/admin/events', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'sync' })
+      });
+      const json = await res.json();
+      if (json.success) {
+        setEvents(prevEvents =>
+          prevEvents.map(event =>
+            event._id === id ? { ...event, drivePhotosCount: json.data.drivePhotosCount } : event
+          )
+        );
+        alert('🔄 Sinkronisasi jumlah foto Google Drive berhasil!');
+      } else {
+        alert('❌ Gagal sinkronisasi data.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('❌ Terjadi kesalahan saat sinkronisasi.');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* Top Navbar */}
@@ -272,11 +300,25 @@ export default function AdminDashboard() {
                   <div className={`space-y-3 transition-opacity ${event.hidden ? 'opacity-60' : ''}`}>
                     <div className="flex justify-between items-start gap-2">
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">{event.title}</h3>
-                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap border ${
-                        driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
-                      }`}>
-                        {driveCount} di Drive
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap border ${
+                          driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
+                        }`}>
+                          {driveCount} di Drive
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleSyncPhotosCount(event._id)}
+                          disabled={syncingId === event._id}
+                          className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100 transition-all focus:outline-none"
+                          title="Sinkronkan jumlah foto dari Google Drive"
+                        >
+                          <RefreshCw 
+                            size={11} 
+                            className={syncingId === event._id ? "animate-spin text-blue-600" : ""} 
+                          />
+                        </button>
+                      </div>
                     </div>
 
                     <p className="text-xs text-slate-500 line-clamp-2">{event.description || 'Tidak ada deskripsi.'}</p>
@@ -388,11 +430,25 @@ export default function AdminDashboard() {
                         {new Date(event.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
-                        <span className={`font-bold px-2 py-0.5 rounded border text-[11px] ${
-                          driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
-                        }`}>
-                          {driveCount} Foto
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-bold px-2 py-0.5 rounded border text-[11px] ${
+                            driveCount > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}>
+                            {driveCount} Foto
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSyncPhotosCount(event._id)}
+                            disabled={syncingId === event._id}
+                            className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-100 transition-all focus:outline-none"
+                            title="Sinkronkan jumlah foto dari Google Drive"
+                          >
+                            <RefreshCw 
+                              size={11} 
+                              className={syncingId === event._id ? "animate-spin text-blue-600" : ""} 
+                            />
+                          </button>
+                        </div>
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
                         {event.indexedPhotos && event.indexedPhotos.length > 0 ? (

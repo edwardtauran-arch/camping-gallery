@@ -1,7 +1,6 @@
 import dbConnect from '@/lib/mongodb';
 import Event from '@/models/Event';
 import EventCard from './components/EventCard';
-import { getPhotosFromFolder } from '@/lib/gdrive';
 
 // Mengaktifkan revalidasi otomatis setiap 1 jam agar data tetap segar
 export const revalidate = 3600;
@@ -9,16 +8,6 @@ export const revalidate = 3600;
 export default async function HomePage() {
   await dbConnect();
   const events = await Event.find({ hidden: { $ne: true } }).sort({ date: -1 });
-
-  const eventsWithCount = await Promise.all(
-    events.map(async (event) => {
-      const photos = await getPhotosFromFolder(event.driveFolderId);
-      return {
-        ...event.toObject(),
-        drivePhotosCount: photos.length
-      };
-    })
-  );
 
   return (
     <div>
@@ -31,13 +20,13 @@ export default async function HomePage() {
         </p>
       </div>
 
-      {eventsWithCount.length === 0 ? (
+      {events.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-xl border border-slate-200 shadow-sm">
           <p className="text-slate-500">Belum ada album event yang terdaftar di database.</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {eventsWithCount.map((event) => (
+          {events.map((event) => (
             <EventCard key={event._id} event={JSON.parse(JSON.stringify(event))} />
           ))}
         </div>
