@@ -11,6 +11,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
 
@@ -75,6 +76,7 @@ export default function AdminDashboard() {
     if (res.ok) {
       alert('✅ Event Camping Baru Berhasil Ditambahkan!');
       setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+      setIsAddModalOpen(false); // Close add modal
       fetchEvents();
     } else {
       alert('❌ Gagal menambahkan event.');
@@ -175,87 +177,21 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       {/* Top Navbar */}
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-        <h1 className="text-xl font-bold text-slate-900">🛠️ Panel Kontrol Admin</h1>
-        <button onClick={handleLogout} className="flex items-center gap-1.5 text-xs text-red-600 font-semibold hover:underline">
-          <LogOut size={14} /> Keluar Admin
-        </button>
-      </div>
-
-      {/* Form Tambah Kategori Baru (Selalu Bersih & Terbuka) */}
-      <div className="p-6 rounded-xl border border-slate-200 bg-white shadow-sm max-w-2xl">
-        <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <PlusCircle size={18} className="text-emerald-600" /> 
-          Tambah Event Camping Baru
-        </h2>
-        <form onSubmit={handleAddSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Nama Event Camping</label>
-              <input type="text" value={form.title} onChange={handleTitleChange} className="w-full px-3 py-2 border rounded-lg text-sm focus:border-emerald-600 focus:outline-none" placeholder="Contoh: Camping JC Camporee" required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">URL Slug (Terkunci Otomatis)</label>
-              <input 
-                type="text" 
-                value={form.slug} 
-                disabled 
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" 
-                placeholder="Terisi otomatis..." 
-                required 
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">ID Folder Google Drive</label>
-              <input type="text" value={form.driveFolderId} onChange={(e) => setForm({...form, driveFolderId: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm focus:border-emerald-600 focus:outline-none" placeholder="Masukkan Kode Folder ID dari Google Drive" required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Kegiatan</label>
-              <input type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm focus:border-emerald-600 focus:outline-none" required />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Deskripsi Singkat Acara</label>
-            <textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm focus:border-emerald-600 focus:outline-none" rows="2" placeholder="Tuliskan info keseruan di sini..."></textarea>
-          </div>
-
-          {/* Visibility Switch */}
-          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
-            <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, hidden: !form.hidden })}
-              className="flex items-center gap-2 group focus:outline-none"
-            >
-              {/* Switch track */}
-              <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
-                form.hidden ? 'bg-slate-300' : 'bg-emerald-500'
-              }`}>
-                {/* Switch knob */}
-                <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
-                  form.hidden ? 'left-[3px]' : 'left-[21px]'
-                }`} />
-              </div>
-              <span className={`text-[11px] font-semibold transition-colors ${
-                form.hidden ? 'text-slate-500 font-normal' : 'text-emerald-700 font-bold'
-              }`}>
-                {form.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
-              </span>
-            </button>
-          </div>
-
-          <div className="flex gap-3">
-            <button type="submit" className="font-medium text-sm py-2 px-6 rounded-lg shadow transition-colors text-white bg-emerald-700 hover:bg-emerald-600">
-              Simpan & Aktifkan Galeri foto
-            </button>
-          </div>
-        </form>
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-wrap gap-3">
+        <h1 className="text-lg sm:text-xl font-bold text-slate-900">🛠️ Panel Kontrol Admin</h1>
+        <div className="flex items-center gap-3 sm:gap-4">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm py-2 px-3 sm:px-4 rounded-lg shadow transition-colors"
+          >
+            <PlusCircle size={14} className="sm:w-4 sm:h-4" /> Tambah Event Baru
+          </button>
+          <button onClick={handleLogout} className="flex items-center gap-1.5 text-xs text-red-600 font-semibold hover:underline">
+            <LogOut size={14} /> Keluar Admin
+          </button>
+        </div>
       </div>
       
       {/* List Daftar Camping */}
@@ -518,7 +454,7 @@ export default function AdminDashboard() {
 
       {/* Edit Modal (Dialog Pop-up Window) */}
       {isEditModalOpen && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
@@ -633,6 +569,130 @@ export default function AdminDashboard() {
                   className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors"
                 >
                   Perbarui Data Event
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Tambah Modal (Dialog Pop-up Window) */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2 text-base">
+                <PlusCircle size={16} className="text-emerald-600 animate-pulse" />
+                Tambah Event Camping Baru
+              </h3>
+              <button 
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            {/* Body Form */}
+            <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Event Camping</label>
+                  <input 
+                    type="text" 
+                    value={form.title} 
+                    onChange={handleTitleChange} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
+                    placeholder="Contoh: Camping JC Camporee" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">URL Slug (Terkunci Otomatis)</label>
+                  <input 
+                    type="text" 
+                    value={form.slug} 
+                    disabled 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-400 font-mono text-xs cursor-not-allowed focus:outline-none" 
+                    placeholder="Terisi otomatis..." 
+                    required 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">ID Folder Google Drive</label>
+                  <input 
+                    type="text" 
+                    value={form.driveFolderId} 
+                    onChange={(e) => setForm({...form, driveFolderId: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
+                    placeholder="Masukkan Kode Folder ID" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kegiatan</label>
+                  <input 
+                    type="date" 
+                    value={form.date} 
+                    onChange={(e) => setForm({...form, date: e.target.value})} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
+                    required 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
+                <textarea 
+                  value={form.description} 
+                  onChange={(e) => setForm({...form, description: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" 
+                  rows="3" 
+                  placeholder="Tuliskan info keseruan di sini..."
+                ></textarea>
+              </div>
+
+              {/* Form Add Visibility Switch */}
+              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
+                <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, hidden: !form.hidden })}
+                  className="flex items-center gap-2 group focus:outline-none"
+                >
+                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${
+                    form.hidden ? 'bg-slate-300' : 'bg-emerald-500'
+                  }`}>
+                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${
+                      form.hidden ? 'left-[3px]' : 'left-[21px]'
+                    }`} />
+                  </div>
+                  <span className={`text-[11px] font-semibold transition-colors ${
+                    form.hidden ? 'text-slate-500 font-normal' : 'text-emerald-700 font-bold'
+                  }`}>
+                    {form.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
+                  </span>
+                </button>
+              </div>
+
+              {/* Actions Footer */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddModalOpen(false)} 
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"
+                >
+                  <XCircle size={16} /> Batal
+                </button>
+                <button 
+                  type="submit" 
+                  className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors"
+                >
+                  Simpan & Aktifkan Galeri
                 </button>
               </div>
             </form>
