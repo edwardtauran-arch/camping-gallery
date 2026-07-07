@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
 import Script from 'next/script';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 
@@ -7,6 +8,7 @@ import { Loader2, CheckCircle2 } from 'lucide-react';
 export const SCAN_CHANNEL = 'bg-scan-progress';
 
 export default function AdminLayout({ children }) {
+  const pathname = usePathname();
   const [faceApiReady, setFaceApiReady] = useState(false);
   const [bgScanJob, setBgScanJob] = useState(null);
 
@@ -144,12 +146,18 @@ export default function AdminLayout({ children }) {
     }
   }, [runBackgroundScan]);
 
-  // Auto-trigger scan once face-api is ready
+  // Auto-trigger scan once face-api is ready (and NOT on manual scan page)
   useEffect(() => {
+    const isOnScanPage = pathname?.includes('/admin/scan/');
+    if (isOnScanPage) {
+      bgStopRef.current = true;
+      setBgScanJob(null);
+      return;
+    }
     if (faceApiReady && !bgScanRunning.current) {
       startNextIfNeeded();
     }
-  }, [faceApiReady, startNextIfNeeded]);
+  }, [faceApiReady, startNextIfNeeded, pathname]);
 
   const pct = bgScanJob && bgScanJob.total > 0
     ? Math.round((bgScanJob.progress / bgScanJob.total) * 100)

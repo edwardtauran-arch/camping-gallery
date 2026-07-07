@@ -31,12 +31,19 @@ export default function ScanClient({ event, initialPhotos }) {
   const percentIndexed = totalPhotos > 0 ? Math.round((alreadyIndexed / totalPhotos) * 100) : 0;
   const isComplete = unscannedPhotos.length === 0 && totalPhotos > 0;
 
+  // On mount, check if faceapi is already loaded globally by layout
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.faceapi) {
+      setScriptLoaded(true);
+    }
+  }, []);
+
   // Load models once script is ready
   useEffect(() => {
     if (scriptLoaded && !modelsLoaded && !loadingRef.current) {
       loadModels();
     }
-  }, [scriptLoaded]);
+  }, [scriptLoaded, modelsLoaded]);
 
   const loadModels = async () => {
     if (loadingRef.current || modelsLoaded) return;
@@ -74,12 +81,10 @@ export default function ScanClient({ event, initialPhotos }) {
 
     // Use live unscanned list at call time
     const currentIndexedIds = new Set((event.indexedPhotos || []).map(p => p.id));
-    // We use a ref-tracked version of already-indexed to accumulate during session
     const sessionIndexed = [];
 
     const toScan = initialPhotos.filter(p => !currentIndexedIds.has(p.id));
 
-    // Options: larger inputSize = more accurate face detection
     const detectorOptions = new faceapi.TinyFaceDetectorOptions({
       inputSize: 608,       // 160, 224, 320, 416, 608 — higher = more accurate, slower
       scoreThreshold: 0.35, // lower = catch more faces (default 0.5)
@@ -97,6 +102,7 @@ export default function ScanClient({ event, initialPhotos }) {
 
       const photo = toScan[i];
       processedCount = i + 1;
+      setCurrentIndex(processedCount);
 
       setStatusMessage(`📷 Memindai (${processedCount}/${toScan.length}): ${photo.name}...`);
 
@@ -211,7 +217,7 @@ export default function ScanClient({ event, initialPhotos }) {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <Script
         src="/js/face-api.js"
-        strategy="lazyOnload"
+        strategy="afterInteractive"
         onLoad={() => setScriptLoaded(true)}
       />
 
@@ -251,113 +257,92 @@ export default function ScanClient({ event, initialPhotos }) {
         </div>
 
         {/* Action Buttons */}
-        <div className="space-y-3 pt-2">
+        <div className="pt-2 space-y-3">
           {isScanning ? (
             <button
               onClick={handlePauseScan}
-              className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
+              className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors"
             >
-              <Pause size={18} /> Jeda Pemindaian
+              <Pause size={16} /> Jeda Pemindaian
             </button>
           ) : (
             <button
               onClick={handleStartScan}
-              disabled={!modelsLoaded || unscannedPhotos.length === 0}
-              className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer disabled:cursor-not-allowed"
+              disabled={!modelsLoaded || isComplete}
+              className={`w-full py-2.5 px-4 font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors ${
+                !modelsLoaded || isComplete
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200 shadow-none'
+                  : 'bg-emerald-700 hover:bg-emerald-600 text-white'
+              }`}
             >
-              <Play size={18} />
-              {isComplete ? 'Semua Sudah Terindeks' : currentIndexRef.current > 0 ? 'Lanjutkan Scan' : 'Mulai Scan Foto'}
+              <Play size={16} /> {currentIndexRef.current > 0 ? 'Lanjutkan Scan' : 'Mulai Scan Foto'}
             </button>
           )}
 
-          {alreadyIndexed > 0 && !isScanning && (
-            <button
-              onClick={handleResetIndex}
-              className="w-full bg-white border border-red-200 text-red-600 hover:bg-red-50 font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm"
-            >
-              <RefreshCw size={14} /> Reset &amp; Scan Ulang
-            </button>
-          )}
+          <button
+            onClick={handleResetIndex}
+            className="w-full py-2 px-4 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-bold text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 transition-colors"
+          >
+            <RefreshCw size={14} /> Reset &amp; Scan Ulang
+          </button>
         </div>
 
-        {/* Status Log */}
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs font-mono text-slate-600 min-h-[64px] flex items-start">
-          <span className="leading-relaxed">{statusMessage}</span>
+        {/* Live scanning status box */}
+        <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5">
+          <p className="text-xs text-slate-500 font-medium font-mono truncate">{statusMessage}</p>
         </div>
 
-        {/* Model Info */}
-        <div className="border-t border-slate-100 pt-3 space-y-1 text-[11px] text-slate-400">
-          <p className="font-semibold text-slate-500">⚙️ Konfigurasi Model AI</p>
-          <p>Detektor: Tiny Face Detector</p>
-          <p>Input Size: 608px (Akurasi Tinggi)</p>
-          <p>Score Threshold: 0.35 (Sensitif)</p>
-          <p>Descriptor: 128-D Face Recognition Net</p>
+        {/* Technical Config */}
+        <div className="pt-4 border-t border-slate-100 text-[11px] text-slate-400 space-y-1">
+          <div className="font-semibold text-slate-500 flex items-center gap-1">⚙️ Konfigurasi Model AI</div>
+          <div>Detektor: Tiny Face Detector</div>
+          <div>Input Size: 608px (Akurasi Tinggi)</div>
+          <div>Score Threshold: 0.35 (Sensitif)</div>
+          <div>Descriptor: 128-D Face Recognition Net</div>
         </div>
       </div>
 
-      {/* Scan Monitor */}
-      <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col min-h-[500px]">
-        <h3 className="font-bold text-slate-800 text-lg border-b border-slate-100 pb-3 mb-4">
+      {/* Activity Log */}
+      <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col min-h-[400px]">
+        <h3 className="font-bold text-slate-800 text-lg border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
           🖥️ Aktivitas Pemindaian Wajah
         </h3>
 
         {scanResults.length === 0 ? (
-          <div className="flex-grow flex flex-col justify-center items-center text-slate-400 py-12">
-            <ImageIcon size={48} className="stroke-1 mb-3 text-slate-300" />
-            {modelsLoaded && unscannedPhotos.length === 0 ? (
-              <>
-                <p className="text-sm font-medium text-emerald-600">✅ Semua foto telah terindeks.</p>
-                <p className="text-xs text-slate-400 mt-1">Gunakan Reset untuk memindai ulang semua foto.</p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-medium">Menunggu pemindaian dimulai...</p>
-                <p className="text-xs text-slate-400 mt-1">Pemindaian akan mulai otomatis setelah model AI siap.</p>
-              </>
-            )}
+          <div className="flex-grow flex flex-col items-center justify-center text-slate-400 py-12">
+            <ImageIcon size={48} className="text-slate-200 mb-3 animate-pulse" />
+            <p className="text-sm font-semibold text-slate-500">Menunggu pemindaian dimulai...</p>
+            <p className="text-xs text-slate-400 mt-1">Pemindaian akan mulai otomatis setelah model AI siap.</p>
           </div>
         ) : (
-          <div className="flex-grow overflow-y-auto max-h-[540px] pr-2 space-y-2">
-            {scanResults.map((result, idx) => (
+          <div className="flex-grow overflow-y-auto space-y-2 max-h-[500px] pr-1">
+            {scanResults.map((res, index) => (
               <div
-                key={`${result.id}-${idx}`}
-                className={`flex justify-between items-center p-3 rounded-lg border text-sm transition-all ${
-                  idx === 0
-                    ? 'bg-emerald-50/50 border-emerald-200 ring-1 ring-emerald-200'
-                    : 'bg-slate-50/50 border-slate-200'
+                key={res.id + '-' + index}
+                className={`p-3 rounded-lg border text-xs flex justify-between items-center transition-all ${
+                  res.status === 'success'
+                    ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800'
+                    : 'bg-red-50/50 border-red-100 text-red-800'
                 }`}
               >
-                <div className="flex items-center gap-3 truncate max-w-[65%]">
-                  <div className="w-10 h-10 rounded-lg bg-slate-200 border border-slate-300 overflow-hidden flex-shrink-0">
-                    <img
-                      src={`/api/proxy-image?id=${result.id}&sz=w80`}
-                      alt="preview"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <span className="font-mono text-xs text-slate-700 truncate font-medium" title={result.name}>
-                    {result.name}
-                  </span>
+                <div className="min-w-0 flex-grow pr-4">
+                  <div className="font-semibold truncate">{res.name}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 font-mono">ID: {res.id}</div>
                 </div>
-
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {result.status === 'success' ? (
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  {res.status === 'success' ? (
                     <>
-                      <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                        result.facesCount > 0
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-slate-100 text-slate-500'
-                      }`}>
-                        {result.facesCount > 0 ? `${result.facesCount} Wajah` : 'Tanpa Wajah'}
+                      <span className="font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px]">
+                        👤 {res.facesCount} Wajah
                       </span>
-                      <CheckCircle size={15} className="text-emerald-500" />
+                      <CheckCircle size={14} className="text-emerald-600" />
                     </>
                   ) : (
                     <>
-                      <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full" title={result.error}>
+                      <span className="font-bold bg-red-100 text-red-800 px-2 py-0.5 rounded-full text-[10px]" title={res.error}>
                         Gagal
                       </span>
-                      <AlertCircle size={15} className="text-red-500" />
+                      <AlertCircle size={14} className="text-red-600" />
                     </>
                   )}
                 </div>
