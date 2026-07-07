@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
-import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Brain, Loader2, CheckCircle2, X } from 'lucide-react';
+import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Brain, Loader2, CheckCircle2, X, ExternalLink } from 'lucide-react';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -527,6 +527,16 @@ export default function AdminDashboard() {
 
                     <div className="flex items-center gap-1.5">
                       <a
+                        href={`/gallery/${event.slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
+                        title="Buka halaman galeri publik"
+                      >
+                        <ExternalLink size={12} className="flex-shrink-0" />
+                        <span className="hidden xl:inline">Buka</span>
+                      </a>
+                      <a
                         href={`/admin/scan/${event.slug}`}
                         className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
                         title="Scan Wajah AI"
@@ -638,6 +648,15 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <a
+                            href={`/gallery/${event.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
+                            title="Buka halaman galeri publik"
+                          >
+                            <ExternalLink size={12} />
+                          </a>
                           <a
                             href={`/admin/scan/${event.slug}`}
                             className="inline-flex items-center gap-1 bg-emerald-700 text-white hover:bg-emerald-600 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
