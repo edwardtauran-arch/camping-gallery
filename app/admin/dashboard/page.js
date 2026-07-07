@@ -352,45 +352,49 @@ export default function AdminDashboard() {
                   </div>
 
                   {/* Fully opaque button bar */}
-                  <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100">
+                  <div className="flex items-center justify-between gap-2 pt-3 mt-4 border-t border-slate-100 flex-wrap sm:flex-nowrap">
                     {/* Toggle visibility - static read-only grey switch */}
                     <div
-                      className="flex items-center gap-2 select-none cursor-default"
+                      className="flex items-center gap-1.5 select-none cursor-default"
                       title={event.hidden ? 'Status: Tersembunyi (Ubah lewat form Edit)' : 'Status: Tampil (Ubah lewat form Edit)'}
                     >
                       {/* Switch track */}
-                      <div className="relative w-10 h-[22px] rounded-full bg-slate-200">
+                      <div className="relative w-8 h-[18px] rounded-full bg-slate-200 flex-shrink-0">
                         {/* Switch knob */}
-                        <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-slate-400 transition-all duration-300 ${
-                          event.hidden ? 'left-[3px]' : 'left-[21px]'
+                        <div className={`absolute top-[2px] w-3 h-3 rounded-full bg-slate-400 transition-all duration-300 ${
+                          event.hidden ? 'left-[2px]' : 'left-[18px]'
                         }`} />
                       </div>
-                      <span className="text-[11px] font-semibold text-slate-400">
-                        {event.hidden ? 'Tersembunyi' : 'Tampil'}
+                      <span className="text-[10px] font-semibold text-slate-400 hidden xl:inline">
+                        {event.hidden ? 'Sembunyi' : 'Tampil'}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <a
                         href={`/admin/scan/${event.slug}`}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-colors"
+                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
                         title="Scan Wajah AI"
                       >
-                        <Cpu size={12} /> Scan Wajah
+                        <Cpu size={12} className="flex-shrink-0" />
+                        <span className="hidden xl:inline">Scan Wajah</span>
+                        <span className="hidden sm:inline xl:hidden">Scan</span>
                       </a>
                       <button 
                         onClick={() => startEdit(event)} 
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-colors"
+                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
                         title="Ubah Data Event"
                       >
-                        <Pencil size={12} /> Ubah
+                        <Pencil size={12} className="flex-shrink-0" />
+                        <span className="hidden sm:inline">Ubah</span>
                       </button>
                       <button 
                         onClick={() => handleDelete(event._id)} 
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-colors"
+                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-all"
                         title="Hapus Kategori"
                       >
-                        <Trash2 size={12} /> Hapus
+                        <Trash2 size={12} className="flex-shrink-0" />
+                        <span className="hidden sm:inline">Hapus</span>
                       </button>
                     </div>
                   </div>
@@ -478,24 +482,30 @@ export default function AdminDashboard() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
                           <a
                             href={`/admin/scan/${event.slug}`}
-                            className="inline-flex items-center gap-1 bg-emerald-700 text-white hover:bg-emerald-600 font-semibold px-2.5 py-1.5 rounded text-xs transition-colors"
+                            className="inline-flex items-center gap-1 bg-emerald-700 text-white hover:bg-emerald-600 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
+                            title="Scan Wajah"
                           >
-                            <Cpu size={12} /> Scan
+                            <Cpu size={12} className="flex-shrink-0" />
+                            <span className="hidden sm:inline">Scan</span>
                           </a>
                           <button
                             onClick={() => startEdit(event)}
-                            className="bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 font-semibold px-2.5 py-1.5 rounded text-xs transition-colors"
+                            className="inline-flex items-center gap-1 bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
+                            title="Ubah"
                           >
-                            Ubah
+                            <Pencil size={12} className="flex-shrink-0" />
+                            <span className="hidden sm:inline">Ubah</span>
                           </button>
                           <button
                             onClick={() => handleDelete(event._id)}
-                            className="bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded text-xs transition-colors"
+                            className="inline-flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 font-semibold px-2 py-1.5 rounded text-xs transition-colors"
+                            title="Hapus"
                           >
-                            Hapus
+                            <Trash2 size={12} className="flex-shrink-0" />
+                            <span className="hidden sm:inline">Hapus</span>
                           </button>
                         </div>
                       </td>
