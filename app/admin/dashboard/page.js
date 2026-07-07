@@ -14,7 +14,7 @@ export default function AdminDashboard() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState('grid');
+  const [viewMode, setViewMode] = useState('list');
 
   // Receive scan progress from admin layout via BroadcastChannel
   const [bgScanJob, setBgScanJob] = useState(null);
