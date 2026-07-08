@@ -1,13 +1,26 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Loader2, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Loader2, CheckCircle2, ExternalLink, ImageOff, Image as ImageIcon } from 'lucide-react';
+
+const getEventThumbnailUrl = (event) => {
+  if (event.thumbnail) {
+    if (event.thumbnail.startsWith('http://') || event.thumbnail.startsWith('https://')) {
+      return event.thumbnail;
+    }
+    return `/api/proxy-image?id=${event.thumbnail}&sz=w400`;
+  }
+  if (event.indexedPhotos && event.indexedPhotos.length > 0) {
+    return `/api/proxy-image?id=${event.indexedPhotos[0].id}&sz=w400`;
+  }
+  return null;
+};
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [events, setEvents] = useState([]);
-  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
-  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
+  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -15,6 +28,11 @@ export default function AdminDashboard() {
   const [syncingId, setSyncingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('list');
+  const [activePickerEvent, setActivePickerEvent] = useState(null);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pickerPhotos, setPickerPhotos] = useState([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState(null);
 
   // Receive scan progress from admin layout via BroadcastChannel
   const [bgScanJob, setBgScanJob] = useState(null);
@@ -96,7 +114,7 @@ export default function AdminDashboard() {
       body: JSON.stringify(form)
     });
     if (res.ok) {
-      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
       setIsAddModalOpen(false);
       await fetchEvents();
     } else {
@@ -123,14 +141,97 @@ export default function AdminDashboard() {
   const startEdit = (event) => {
     setEditingId(event._id);
     const formattedDate = event.date ? new Date(event.date).toISOString().split('T')[0] : '';
-    setEditForm({ title: event.title, slug: event.slug, driveFolderId: event.driveFolderId, date: formattedDate, description: event.description || '', hidden: event.hidden || false });
+    setEditForm({
+      title: event.title,
+      slug: event.slug,
+      driveFolderId: event.driveFolderId,
+      date: formattedDate,
+      description: event.description || '',
+      hidden: event.hidden || false,
+      thumbnail: event.thumbnail || ''
+    });
     setIsEditModalOpen(true);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setIsEditModalOpen(false);
-    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false });
+    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
+  };
+
+  const openThumbnailPicker = async (target, eventOrFolderId) => {
+    setPickerTarget(target);
+    setIsPickerOpen(true);
+    setPickerLoading(true);
+    setPickerPhotos([]);
+
+    let url = '';
+    if (target === 'db') {
+      setActivePickerEvent(eventOrFolderId); // event object
+      url = `/api/admin/events?slug=${eventOrFolderId.slug}&photos=1`;
+    } else {
+      // target is 'edit' or 'add', eventOrFolderId is folderId string
+      if (!eventOrFolderId) {
+        alert('⚠️ Silakan masukkan ID Folder Google Drive terlebih dahulu!');
+        setIsPickerOpen(false);
+        setPickerLoading(false);
+        return;
+      }
+      url = `/api/admin/events?folderId=${encodeURIComponent(eventOrFolderId)}&photos=1`;
+    }
+
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.success) {
+        setPickerPhotos(json.photos || []);
+      } else {
+        alert('❌ Gagal memuat foto dari Google Drive.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('❌ Terjadi kesalahan saat memuat foto.');
+    } finally {
+      setPickerLoading(false);
+    }
+  };
+
+  const handleSelectThumbnail = async (photoId) => {
+    if (pickerTarget === 'add') {
+      setForm(prev => ({ ...prev, thumbnail: photoId }));
+      setIsPickerOpen(false);
+    } else if (pickerTarget === 'edit') {
+      setEditForm(prev => ({ ...prev, thumbnail: photoId }));
+      setIsPickerOpen(false);
+    } else if (pickerTarget === 'db' && activePickerEvent) {
+      try {
+        const res = await fetch('/api/admin/events', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: activePickerEvent._id,
+            title: activePickerEvent.title,
+            slug: activePickerEvent.slug,
+            driveFolderId: activePickerEvent.driveFolderId,
+            date: activePickerEvent.date ? new Date(activePickerEvent.date).toISOString().split('T')[0] : '',
+            description: activePickerEvent.description || '',
+            hidden: !!activePickerEvent.hidden,
+            thumbnail: photoId
+          })
+        });
+        if (res.ok) {
+          alert('✅ Thumbnail berhasil diperbarui!');
+          setIsPickerOpen(false);
+          setActivePickerEvent(null);
+          fetchEvents();
+        } else {
+          alert('❌ Gagal memperbarui thumbnail.');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('❌ Terjadi kesalahan.');
+      }
+    }
   };
 
   const handleDelete = async (id) => {
@@ -246,6 +347,26 @@ export default function AdminDashboard() {
               return (
                 <div key={event._id} className="rounded-xl border p-5 flex flex-col justify-between shadow-sm transition-all duration-200 hover:shadow-md bg-white border-slate-200 hover:-translate-y-0.5">
                   <div className={`space-y-3 transition-opacity ${event.hidden ? 'opacity-60' : ''}`}>
+                    {/* Thumbnail Preview */}
+                    <div className="relative w-full aspect-[16/9] bg-slate-100 rounded-lg overflow-hidden border border-slate-200 group/thumb">
+                      {getEventThumbnailUrl(event) ? (
+                        <img src={getEventThumbnailUrl(event)} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 flex flex-col items-center justify-center text-slate-400">
+                          <ImageOff size={20} className="mb-1" />
+                          <span className="text-[10px] font-semibold">No Image</span>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => openThumbnailPicker('db', event)}
+                        type="button"
+                        className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-xs font-bold gap-1 cursor-pointer focus:outline-none"
+                      >
+                        <ImageIcon size={18} />
+                        Pilih Thumbnail
+                      </button>
+                    </div>
+
                     <div className="flex justify-between items-start gap-2">
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">{event.title}</h3>
                       <div className="flex items-center gap-1.5">
@@ -377,8 +498,29 @@ export default function AdminDashboard() {
                   return (
                     <tr key={event._id} className={`hover:bg-slate-50/55 transition-colors ${editingId === event._id ? 'bg-amber-50/20' : ''}`}>
                       <td className={`px-6 py-4 transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
-                        <div className="font-bold text-slate-900">{event.title}</div>
-                        <div className="text-slate-500 text-xs mt-0.5 line-clamp-1 max-w-sm">{event.description || 'Tidak ada deskripsi.'}</div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => openThumbnailPicker('db', event)}
+                            type="button"
+                            className="w-12 h-8 rounded bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 relative group/thumb cursor-pointer focus:outline-none"
+                            title="Klik untuk memilih thumbnail"
+                          >
+                            {getEventThumbnailUrl(event) ? (
+                              <img src={getEventThumbnailUrl(event)} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-400">
+                                <ImageOff size={12} />
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <ImageIcon size={10} />
+                            </div>
+                          </button>
+                          <div>
+                            <div className="font-bold text-slate-900">{event.title}</div>
+                            <div className="text-slate-500 text-xs mt-0.5 line-clamp-1 max-w-sm">{event.description || 'Tidak ada deskripsi.'}</div>
+                          </div>
+                        </div>
                         {bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done && (
                           <div className="mt-1 flex items-center gap-1.5">
                             <Loader2 size={10} className="text-amber-500 animate-spin" />
@@ -474,6 +616,27 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
                 <textarea value={editForm.description} onChange={(e) => setEditForm({...editForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" rows="3" placeholder="Tuliskan info keseruan di sini..." />
               </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">ID File Thumbnail (Google Drive ID atau URL Gambar)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editForm.thumbnail}
+                    onChange={(e) => setEditForm({...editForm, thumbnail: e.target.value})}
+                    className="flex-grow px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none"
+                    placeholder="Contoh: 1vA_mO8-hPzB... atau link gambar langsung"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openThumbnailPicker('edit', editForm.driveFolderId)}
+                    className="flex items-center gap-1 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-700 font-bold text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap focus:outline-none"
+                  >
+                    <ImageIcon size={14} />
+                    Pilih Foto
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">Kosongkan jika ingin menggunakan foto pertama yang terindeks secara otomatis.</p>
+              </div>
               <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
                 <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
                 <button type="button" onClick={() => setEditForm({ ...editForm, hidden: !editForm.hidden })} className="flex items-center gap-2 group focus:outline-none">
@@ -529,6 +692,27 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
                 <textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none" rows="3" placeholder="Tuliskan info keseruan di sini..." />
               </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">ID File Thumbnail (Google Drive ID atau URL Gambar)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={form.thumbnail}
+                    onChange={(e) => setForm({...form, thumbnail: e.target.value})}
+                    className="flex-grow px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-emerald-600 focus:outline-none"
+                    placeholder="Contoh: 1vA_mO8-hPzB... atau link gambar langsung"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openThumbnailPicker('add', form.driveFolderId)}
+                    className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-700 font-bold text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap focus:outline-none"
+                  >
+                    <ImageIcon size={14} />
+                    Pilih Foto
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">Kosongkan jika ingin menggunakan foto pertama yang terindeks secara otomatis.</p>
+              </div>
               <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
                 <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
                 <button type="button" onClick={() => setForm({ ...form, hidden: !form.hidden })} className="flex items-center gap-2 group focus:outline-none">
@@ -548,6 +732,86 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {/* Thumbnail Picker Modal */}
+      <ThumbnailPickerModal
+        isOpen={isPickerOpen}
+        onClose={() => {
+          setIsPickerOpen(false);
+          setActivePickerEvent(null);
+        }}
+        photos={pickerPhotos}
+        loading={pickerLoading}
+        onSelect={handleSelectThumbnail}
+        event={pickerTarget === 'db' ? activePickerEvent : { title: 'Event Baru' }}
+      />
+    </div>
+  );
+}
+
+// Standalone Picker Modal Component
+function ThumbnailPickerModal({ isOpen, onClose, photos, loading, onSelect, event }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="bg-white border border-slate-200 w-full max-w-4xl h-[80vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div>
+            <h3 className="font-bold text-slate-800 text-base">
+              🖼️ Pilih Thumbnail Event
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">Pilih salah satu foto dari Google Drive untuk {event?.title}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors">
+            <XCircle size={20} />
+          </button>
+        </div>
+
+        <div className="flex-grow overflow-y-auto p-6 bg-slate-50">
+          {loading ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-500">
+              <Loader2 size={36} className="animate-spin text-emerald-600 mb-3" />
+              <p className="text-sm font-semibold">Mengambil foto dari Google Drive...</p>
+            </div>
+          ) : photos.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-500 text-center py-12">
+              <span className="text-4xl mb-2">📁</span>
+              <p className="text-sm font-semibold">Tidak ada foto ditemukan di folder Google Drive.</p>
+              <p className="text-xs text-slate-400 mt-1">Pastikan folder berisi file gambar (.jpg, .png) dan memiliki izin akses yang benar.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {photos.map((photo) => (
+                <button
+                  key={photo.id}
+                  onClick={() => onSelect(photo.id)}
+                  type="button"
+                  className="group relative aspect-[4/3] rounded-xl overflow-hidden bg-white border-2 border-slate-200 hover:border-emerald-500 transition-all hover:scale-[1.03] shadow-sm flex flex-col items-stretch focus:outline-none"
+                >
+                  <img
+                    src={`/api/proxy-image?id=${photo.id}&sz=w300`}
+                    alt={photo.name}
+                    className="w-full flex-grow object-cover"
+                    loading="lazy"
+                  />
+                  <div className="bg-slate-900/5 group-hover:bg-slate-900/0 absolute inset-0 transition-colors" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+          <button
+            type="button"
+            onClick={onClose}
+            className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"
+          >
+            Batal
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

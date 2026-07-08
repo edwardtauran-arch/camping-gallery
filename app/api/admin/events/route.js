@@ -16,7 +16,18 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const slug = searchParams.get('slug');
+    const folderId = searchParams.get('folderId');
     const fetchPhotos = searchParams.get('photos') === '1';
+
+    if (folderId && fetchPhotos) {
+      let photos = [];
+      try {
+        photos = await getPhotosFromFolder(folderId);
+      } catch (e) {
+        console.error('[GET folder photos] Gagal ambil foto drive:', e);
+      }
+      return NextResponse.json({ success: true, photos });
+    }
 
     if (slug && fetchPhotos) {
       // Background scan: return event + its Google Drive photos
@@ -67,7 +78,7 @@ export async function PUT(request) {
   try {
     const body = await request.json();
     console.log("[API EVENTS PUT] Received body:", body);
-    const { id, title, slug, driveFolderId, date, description, hidden } = body;
+    const { id, title, slug, driveFolderId, date, description, hidden, thumbnail } = body;
     
     // Fetch Google Drive photo count once on update
     let drivePhotosCount = 0;
@@ -80,7 +91,7 @@ export async function PUT(request) {
 
     const updatedEvent = await Event.findByIdAndUpdate(
       id,
-      { title, slug, driveFolderId, date, description, hidden: !!hidden, drivePhotosCount },
+      { title, slug, driveFolderId, date, description, hidden: !!hidden, drivePhotosCount, thumbnail },
       { new: true } // Mengembalikan data terbaru setelah di-update
     );
     console.log("[API EVENTS PUT] Updated event in DB:", updatedEvent);
