@@ -90,6 +90,10 @@ export default function AdminDashboard() {
   const fetchEvents = async () => {
     try {
       const res = await fetch('/api/admin/events');
+      if (res.status === 401) {
+        router.push('/admin');
+        return;
+      }
       const json = await res.json();
       if (json.success) setEvents(json.data);
     } catch (err) {
