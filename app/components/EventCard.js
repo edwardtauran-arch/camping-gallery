@@ -1,19 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 
 export default function EventCard({ event }) {
   const [loading, setLoading] = useState(false);
-  const [randomPhotoId, setRandomPhotoId] = useState(null);
-
-  useEffect(() => {
-    if (!event.thumbnail && event.indexedPhotos && event.indexedPhotos.length > 0) {
-      const randomIndex = Math.floor(Math.random() * event.indexedPhotos.length);
-      setRandomPhotoId(event.indexedPhotos[randomIndex].id);
-    }
-  }, [event.thumbnail, event.indexedPhotos]);
 
   const getThumbnailUrl = () => {
     if (event.thumbnail) {
@@ -22,8 +14,8 @@ export default function EventCard({ event }) {
       }
       return `/api/proxy-image?id=${event.thumbnail}&sz=w600`;
     }
-    if (randomPhotoId) {
-      return `/api/proxy-image?id=${randomPhotoId}&sz=w600`;
+    if (event.randomThumbnailId) {
+      return `/api/proxy-image?id=${event.randomThumbnailId}&sz=w600`;
     }
     // Gambar dummy camping sebagai contoh fallback jika data belum diisi
     return 'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=600&auto=format&fit=crop&q=60';
