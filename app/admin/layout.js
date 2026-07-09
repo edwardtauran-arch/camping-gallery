@@ -4,6 +4,14 @@ import { usePathname } from 'next/navigation';
 import Script from 'next/script';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 
+const formatDuration = (seconds) => {
+  if (!seconds || isNaN(seconds) || seconds === Infinity) return '';
+  if (seconds < 60) return `${Math.round(seconds)}d`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins}m ${secs}d`;
+};
+
 // BroadcastChannel key for sharing scan progress with dashboard
 export const SCAN_CHANNEL = 'bg-scan-progress';
 
@@ -22,6 +30,20 @@ export default function AdminLayout({ children }) {
     channelRef.current = new BroadcastChannel(SCAN_CHANNEL);
     return () => channelRef.current?.close();
   }, []);
+
+  // Keep alive session during background scanning
+  useEffect(() => {
+    const isScanning = bgScanJob && !bgScanJob.done;
+    if (!isScanning) return;
+    const interval = setInterval(async () => {
+      try {
+        await fetch('/api/auth');
+      } catch (err) {
+        console.error('[BgKeepAlive] Failed to ping auth:', err);
+      }
+    }, 60000); // ping every 1 minute
+    return () => clearInterval(interval);
+  }, [bgScanJob]);
 
   const broadcast = useCallback((data) => {
     try { channelRef.current?.postMessage(data); } catch (_) {}
@@ -61,8 +83,9 @@ export default function AdminLayout({ children }) {
     const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
     let batch = [];
     let done = 0;
+    const scanStartTime = Date.now();
 
-    const jobBase = { eventId: event._id, eventTitle: event.title, progress: 0, total: toScan.length, done: false };
+    const jobBase = { eventId: event._id, eventTitle: event.title, progress: 0, total: toScan.length, done: false, eta: '' };
     setBgScanJob(jobBase);
     broadcast(jobBase);
 
@@ -92,7 +115,13 @@ export default function AdminLayout({ children }) {
       }
 
       done++;
-      const update = { eventId: event._id, eventTitle: event.title, progress: done, total: toScan.length, done: false };
+      const elapsedMs = Date.now() - scanStartTime;
+      const averageMsPerPhoto = elapsedMs / done;
+      const remainingPhotosCount = toScan.length - done;
+      const remainingMs = remainingPhotosCount * averageMsPerPhoto;
+      const etaStr = formatDuration(remainingMs / 1000);
+
+      const update = { eventId: event._id, eventTitle: event.title, progress: done, total: toScan.length, done: false, eta: etaStr };
       setBgScanJob(update);
       broadcast(update);
 
@@ -113,7 +142,7 @@ export default function AdminLayout({ children }) {
     }
 
     bgScanRunning.current = false;
-    const doneState = { eventId: event._id, eventTitle: event.title, progress: done, total: toScan.length, done: true };
+    const doneState = { eventId: event._id, eventTitle: event.title, progress: done, total: toScan.length, done: true, eta: '' };
     setBgScanJob(doneState);
     broadcast(doneState);
 
@@ -186,7 +215,10 @@ export default function AdminLayout({ children }) {
                   style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #f59e0b, #ef4444)' }}
                 />
               </div>
-              <span className="text-[10px] text-slate-400 whitespace-nowrap">{bgScanJob.progress}/{bgScanJob.total}</span>
+              <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                {bgScanJob.progress}/{bgScanJob.total}
+                {bgScanJob.eta && ` (${bgScanJob.eta})`}
+              </span>
             </div>
           </div>
         </div>

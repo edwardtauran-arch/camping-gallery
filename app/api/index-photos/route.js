@@ -2,9 +2,27 @@ export const dynamic = 'force-dynamic';
 import dbConnect from '@/lib/mongodb';
 import Event from '@/models/Event';
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+
+function isAdmin() {
+  const session = cookies().get('admin_session');
+  return session && session.value === 'authenticated';
+}
 
 export async function POST(req) {
   try {
+    if (!isAdmin()) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Refresh cookie
+    cookies().set('admin_session', 'authenticated', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 24 * 60 * 60,
+      path: '/',
+    });
+
     await dbConnect();
     const { eventId, photos, reset } = await req.json();
 

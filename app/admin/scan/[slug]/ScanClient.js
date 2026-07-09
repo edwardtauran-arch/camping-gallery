@@ -5,10 +5,19 @@ import Script from 'next/script';
 import { Play, Pause, RefreshCw, CheckCircle, AlertCircle, Image as ImageIcon } from 'lucide-react';
 import Link from 'next/link';
 
+const formatDuration = (seconds) => {
+  if (!seconds || isNaN(seconds) || seconds === Infinity) return '';
+  if (seconds < 60) return `${Math.round(seconds)}d`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins}m ${secs}d`;
+};
+
 export default function ScanClient({ event, initialPhotos }) {
   const [scriptLoaded, setScriptLoaded] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Memuat library Face-API...');
+  const [eta, setEta] = useState('');
 
   // Scanned photo IDs from database
   const [indexedPhotos, setIndexedPhotos] = useState(event.indexedPhotos || []);
@@ -21,6 +30,19 @@ export default function ScanClient({ event, initialPhotos }) {
   const stopRef = useRef(false);
   const loadingRef = useRef(false);
   const currentIndexRef = useRef(0);
+
+  // Keep alive session during scanning
+  useEffect(() => {
+    if (!isScanning) return;
+    const interval = setInterval(async () => {
+      try {
+        await fetch('/api/auth');
+      } catch (err) {
+        console.error('[KeepAlive] Failed to ping auth:', err);
+      }
+    }, 60000); // ping every 1 minute
+    return () => clearInterval(interval);
+  }, [isScanning]);
 
   // Derived: which photos still need scanning (recalculated from live indexedPhotos state)
   const indexedIds = new Set(indexedPhotos.map(p => p.id));
@@ -78,6 +100,10 @@ export default function ScanClient({ event, initialPhotos }) {
 
     setIsScanning(true);
     stopRef.current = false;
+    setEta('');
+
+    const scanStartTime = Date.now();
+    let processedThisSession = 0;
 
     // Use live unscanned list at call time
     const currentIndexedIds = new Set((event.indexedPhotos || []).map(p => p.id));
@@ -97,6 +123,7 @@ export default function ScanClient({ event, initialPhotos }) {
       if (stopRef.current) {
         setStatusMessage('⏸️ Pemindaian dijeda. Klik "Lanjutkan Scan" untuk melanjutkan.');
         setIsScanning(false);
+        setEta('');
         return;
       }
 
@@ -171,11 +198,20 @@ export default function ScanClient({ event, initialPhotos }) {
           ...prev.slice(0, 29),
         ]);
       }
+
+      // Hitung ETA setelah memproses tiap gambar
+      processedThisSession++;
+      const elapsedMs = Date.now() - scanStartTime;
+      const averageMsPerPhoto = elapsedMs / processedThisSession;
+      const remainingPhotosCount = toScan.length - processedCount;
+      const remainingMs = remainingPhotosCount * averageMsPerPhoto;
+      setEta(formatDuration(remainingMs / 1000));
     }
 
     if (!stopRef.current) {
       setIsScanning(false);
       currentIndexRef.current = 0;
+      setEta('');
       setStatusMessage('🎉 Selesai! Seluruh foto berhasil dipindai dan disimpan.');
     }
   }, [event._id, initialPhotos]);
@@ -187,6 +223,7 @@ export default function ScanClient({ event, initialPhotos }) {
   const handlePauseScan = () => {
     stopRef.current = true;
     setIsScanning(false);
+    setEta('');
   };
 
   const handleResetIndex = async () => {
@@ -240,6 +277,12 @@ export default function ScanClient({ event, initialPhotos }) {
             <span className="text-slate-500 font-medium">Belum Dipindai:</span>
             <span className="font-bold text-amber-600">{unscannedPhotos.length} Foto</span>
           </div>
+          {isScanning && eta && (
+            <div className="flex justify-between items-center text-sm bg-blue-50/50 border border-blue-100 rounded-lg px-2.5 py-1.5 mt-1 transition-all duration-300">
+              <span className="text-blue-700 font-medium">Estimasi Waktu:</span>
+              <span className="font-bold text-blue-800 animate-pulse">{eta} tersisa</span>
+            </div>
+          )}
         </div>
 
         {/* Progress Bar */}

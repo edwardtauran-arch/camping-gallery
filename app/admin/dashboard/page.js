@@ -432,7 +432,10 @@ export default function AdminDashboard() {
                         />
                       </div>
                       <div className="flex justify-between mt-1">
-                        <span className="text-[10px] text-slate-400">{bgScanJob.progress} / {bgScanJob.total} foto</span>
+                        <span className="text-[10px] text-slate-400">
+                          {bgScanJob.progress} / {bgScanJob.total} foto
+                          {bgScanJob.eta && ` • ${bgScanJob.eta} tersisa`}
+                        </span>
                         <span className="text-[10px] text-slate-400">
                           {bgScanJob.total > 0 ? Math.round((bgScanJob.progress / bgScanJob.total) * 100) : 0}%
                         </span>
@@ -530,6 +533,7 @@ export default function AdminDashboard() {
                             <Loader2 size={10} className="text-amber-500 animate-spin" />
                             <span className="text-[10px] text-amber-600 font-semibold">
                               Scanning {bgScanJob.progress}/{bgScanJob.total}
+                              {bgScanJob.eta && ` (${bgScanJob.eta})`}
                             </span>
                           </div>
                         )}
