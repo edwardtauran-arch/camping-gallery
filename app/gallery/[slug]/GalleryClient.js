@@ -45,9 +45,6 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
             </div>
             <div className="space-y-1.5">
               <h3 className="font-extrabold text-slate-800 text-lg">Foto Tidak Tersedia</h3>
-              <p className="text-slate-500 text-xs leading-relaxed">
-                Galeri foto ini telah disembunyikan oleh administrator dan tidak dapat diakses oleh publik.
-              </p>
             </div>
             <div className="pt-2">
               <Link href="/" className="inline-block bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition-colors shadow">
