@@ -583,22 +583,6 @@ export default function GalleryClient({ photos, event }) {
                   </div>
 
                   <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
-
-                  {/* Initial threshold selector in modal */}
-                  <div className="border-t border-slate-100 pt-4 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-600 flex items-center gap-1">
-                        <SlidersHorizontal size={12} /> Tingkat Kecocokan Awal
-                      </span>
-                      <span className={`font-bold ${thresholdInfo.color}`}>{thresholdInfo.label}</span>
-                    </div>
-                    <input type="range" min={0.30} max={0.80} step={0.01} value={threshold}
-                      onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                      className="w-full accent-emerald-600 cursor-pointer h-2" />
-                    <div className="flex justify-between text-[9px] text-slate-300 font-semibold">
-                      <span>Sangat Ketat</span><span>Ketat</span><span>Sedang</span><span>Longgar</span><span>Sangat Longgar</span>
-                    </div>
-                  </div>
                 </div>
               )}
 
