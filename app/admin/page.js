@@ -1,11 +1,28 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function AdminLogin() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  useEffect(() => {
+    async function checkSession() {
+      try {
+        const res = await fetch('/api/auth');
+        if (res.ok) {
+          router.replace('/admin/dashboard');
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        setLoading(false);
+      }
+    }
+    checkSession();
+  }, [router]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -21,6 +38,14 @@ export default function AdminLogin() {
       setError(data.message || 'Gagal login');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-md mx-auto mt-20 p-6 bg-white rounded-xl border border-slate-200 shadow-sm">

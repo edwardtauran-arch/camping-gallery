@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Download, ChevronLeft, ChevronRight, Camera, Upload, User, Sparkles, AlertCircle, SlidersHorizontal } from 'lucide-react';
+import { X, Download, ChevronLeft, ChevronRight, Camera, Upload, User, Sparkles, AlertCircle, SlidersHorizontal, EyeOff } from 'lucide-react';
 import Script from 'next/script';
+import Link from 'next/link';
 
 // Threshold labels
 const THRESHOLD_LABELS = {
@@ -22,8 +23,42 @@ function getThresholdInfo(val) {
   return THRESHOLD_LABELS[closest] || THRESHOLD_LABELS[0.55];
 }
 
-export default function GalleryClient({ photos, event }) {
+export default function GalleryClient({ photos, event, isPrivate = false }) {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
+
+  // Private mode UI block
+  if (isPrivate) {
+    return (
+      <div className="relative mt-4">
+        {/* Blurred dummy skeleton grid to simulate the page content */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-4 filter blur-md select-none pointer-events-none opacity-40">
+          {Array.from({ length: 10 }).map((_, idx) => (
+            <div key={idx} className="aspect-square bg-slate-200 rounded-lg border border-slate-200" />
+          ))}
+        </div>
+
+        {/* Persistent Modal Overlay with no close button */}
+        <div className="fixed inset-0 z-[120] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl p-6 text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto border border-red-100 animate-pulse">
+              <EyeOff size={32} />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="font-extrabold text-slate-800 text-lg">Foto Tidak Tersedia</h3>
+              <p className="text-slate-500 text-xs leading-relaxed">
+                Galeri foto ini telah disembunyikan oleh administrator dan tidak dapat diakses oleh publik.
+              </p>
+            </div>
+            <div className="pt-2">
+              <Link href="/" className="inline-block bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2.5 rounded-lg transition-colors shadow">
+                Kembali ke Beranda
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
