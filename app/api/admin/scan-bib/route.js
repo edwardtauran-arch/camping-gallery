@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import Event from '@/models/Event';
 import { cookies } from 'next/headers';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,15 +14,6 @@ export async function POST(request) {
   try {
     if (!isAdmin()) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error('[BIB SCAN] GEMINI_API_KEY is not configured in .env.local');
-      return NextResponse.json({ 
-        success: false, 
-        error: 'GEMINI_API_KEY belum dikonfigurasi di .env.local. Silakan dapatkan API Key dari Google AI Studio dan tambahkan ke berkas .env.local Anda.' 
-      }, { status: 400 });
     }
 
     await dbConnect();
@@ -45,44 +35,34 @@ export async function POST(request) {
     const arrayBuffer = await response.arrayBuffer();
     const imageBuffer = Buffer.from(arrayBuffer);
 
-    // 2. Initialize Gemini API Client and call the model
-    console.log(`[BIB SCAN] Calling Gemini API for file: ${driveFileId}`);
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest' });
-
-    const prompt = `Sebutkan semua nomor dada (BIB) pelari yang ada di dalam foto ini.
-Patuhi aturan berikut:
-1. Hanya keluarkan nomor/angka saja.
-2. Hilangkan huruf atau prefiks di depan nomor (misalnya: jika tertulis "M 26366", hanya kembalikan "26366").
-3. Jika ada beberapa nomor BIB, pisahkan dengan koma saja (misalnya: 26366, 28885, 27325).
-4. Jika tidak ada nomor dada (BIB) yang terdeteksi, jawab dengan: "TIDAK_ADA".
-5. Jangan berikan penjelasan atau teks tambahan apapun. Jawab saja.`;
-
-    const imagePart = {
-      inlineData: {
-        data: imageBuffer.toString('base64'),
-        mimeType: 'image/jpeg'
-      }
-    };
-
-    const result = await model.generateContent([prompt, imagePart]);
-    const text = result.response.text().trim();
-    console.log(`[BIB SCAN] Gemini Raw Result: "${text}"`);
-
-    // 3. Extract numbers from Gemini output
-    let cleanBibs = [];
-    if (text && text.toUpperCase() !== 'TIDAK_ADA') {
-      // Split by commas, spaces, or newlines, then extract numeric digits only
-      const rawTokens = text.split(/[\s,]+/);
-      for (const token of rawTokens) {
-        const cleaned = token.replace(/\D/g, ''); // Keep only digits
-        if (cleaned.length >= 3) { // Ensure it's a realistic BIB length
-          cleanBibs.push(cleaned);
-        }
-      }
-      // Remove duplicates
-      cleanBibs = [...new Set(cleanBibs)];
+    // 2. Send the image to the self-hosted PaddleOCR service.
+    const ocrBaseUrl = process.env.PADDLE_OCR_URL;
+    if (!ocrBaseUrl) {
+      return NextResponse.json({
+        success: false,
+        error: 'PADDLE_OCR_URL belum dikonfigurasi.',
+      }, { status: 503 });
     }
+    const ocrUrl = `${ocrBaseUrl.replace(/\/$/, '')}/ocr`;
+    console.log(`[BIB SCAN] Calling PaddleOCR for file: ${driveFileId}`);
+    const ocrResponse = await fetch(ocrUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': response.headers.get('content-type') || 'image/jpeg',
+        ...(process.env.PADDLE_OCR_TOKEN && { Authorization: `Bearer ${process.env.PADDLE_OCR_TOKEN}` }),
+      },
+      body: imageBuffer,
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!ocrResponse.ok) {
+      throw new Error(`PaddleOCR gagal: ${ocrResponse.status} ${await ocrResponse.text()}`);
+    }
+    const { texts = [] } = await ocrResponse.json();
+
+    // 3. Keep only realistic BIB values from PaddleOCR's detected text.
+    const cleanBibs = [...new Set(
+      texts.flatMap((text) => String(text).match(/(?<!\d)\d{3,}(?!\d)/g) || [])
+    )];
 
     console.log(`[BIB SCAN] Extracted BIBs:`, cleanBibs);
 

@@ -177,7 +177,7 @@ export default function ScanClient({ event, initialPhotos }) {
       scoreThreshold: 0.35,
     }) : null;
 
-    const CONCURRENCY = type === 'bib' ? 5 : 1;
+    const CONCURRENCY = 1;
     let batchToSave = [];
     let processedCount = 0;
 
@@ -226,13 +226,13 @@ export default function ScanClient({ event, initialPhotos }) {
 
               if (res.status === 429) {
                 attempt++;
-                lastError = new Error('Terlalu banyak request. API Google menolak.');
+                lastError = new Error('Terlalu banyak request. PaddleOCR tidak merespons.');
                 // Exponential backoff dengan jitter: 15s, 30s, 60s
                 const baseDelay = 15000 * Math.pow(2, attempt - 1);
                 const jitter = Math.random() * 5000; 
                 const delayMs = baseDelay + jitter;
                 
-                setStatusMessage(`⏳ Limit API Google tercapai. Menunggu ${Math.round(delayMs/1000)} detik sebelum mengulang ${photo.name}...`);
+                setStatusMessage(`⏳ PaddleOCR belum siap. Menunggu ${Math.round(delayMs/1000)} detik sebelum mengulang ${photo.name}...`);
                 await new Promise(r => setTimeout(r, delayMs));
                 continue;
               }
@@ -577,8 +577,8 @@ export default function ScanClient({ event, initialPhotos }) {
           <div className="font-semibold text-slate-500 flex items-center gap-1">⚙️ Konfigurasi Model AI</div>
           {hasFaceEnabled && <div>Detektor: Tiny Face Detector (Input 608px)</div>}
           {hasFaceEnabled && <div>Pengenalan Wajah: 128-D Face Recognition</div>}
-          {hasBibEnabled && <div>Deteksi BIB: Google Gemini Flash-Lite API</div>}
-          <div>Resolusi: {hasBibEnabled ? 'BIB: 1600px' : ''} {hasFaceEnabled && hasBibEnabled ? ' | ' : ''} {hasFaceEnabled ? 'Wajah: 800px' : ''}</div>
+          {hasBibEnabled && <div>Deteksi BIB: PaddleOCR</div>}
+          <div>Resolusi: {hasBibEnabled ? 'BIB: 800px' : ''} {hasFaceEnabled && hasBibEnabled ? ' | ' : ''} {hasFaceEnabled ? 'Wajah: 800px' : ''}</div>
         </div>
       </div>
 
