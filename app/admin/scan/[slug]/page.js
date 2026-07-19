@@ -27,6 +27,21 @@ export default async function ScanPage({ params }) {
 
   const photos = await getPhotosFromFolder(event.driveFolderId);
 
+  const hasFace = event.enableFaceSearch !== false;
+  const hasBib = event.enableBibSearch !== false;
+  let pageTitle = "Scan Foto";
+  let pageDesc = "Memproses foto dari Google Drive.";
+  if (hasFace && hasBib) {
+    pageTitle = `🤖 Scan Wajah & BIB: ${event.title}`;
+    pageDesc = "Gunakan fitur ini untuk memproses foto dari Google Drive menggunakan kecerdasan buatan (AI) untuk mengenali wajah dan OCR untuk nomor BIB.";
+  } else if (hasFace) {
+    pageTitle = `🤖 Scan Wajah AI: ${event.title}`;
+    pageDesc = "Gunakan fitur ini untuk memproses foto dari Google Drive menggunakan kecerdasan buatan (AI) untuk mengenali wajah di setiap foto.";
+  } else if (hasBib) {
+    pageTitle = `🔢 Scan Nomor BIB: ${event.title}`;
+    pageDesc = "Gunakan fitur ini untuk memproses foto dari Google Drive menggunakan OCR untuk mengenali nomor dada (BIB) di setiap foto.";
+  }
+
   return (
     <div className="space-y-6">
       <div className="mb-4">
@@ -37,10 +52,10 @@ export default async function ScanPage({ params }) {
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
         <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mb-2">
-          🤖 Scan Wajah: {event.title}
+          {pageTitle}
         </h1>
         <p className="text-slate-500 text-sm">
-          Gunakan fitur ini untuk memproses foto dari Google Drive menggunakan kecerdasan buatan (AI) untuk mengenali wajah di setiap foto.
+          {pageDesc}
         </p>
       </div>
 

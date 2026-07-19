@@ -24,10 +24,29 @@ export default function AdminLayout({ children }) {
   const bgScanRunning = useRef(false);
   const bgStopRef = useRef(false);
   const channelRef = useRef(null);
+  const bgScanJobRef = useRef(null);
 
   // Open BroadcastChannel so dashboard can subscribe to progress updates
   useEffect(() => {
     channelRef.current = new BroadcastChannel(SCAN_CHANNEL);
+    channelRef.current.onmessage = (e) => {
+      const data = e.data;
+      if (data.type === 'event-updated') {
+        if (bgScanRunning.current && bgScanJobRef.current?.eventId === data.eventId) {
+          const activeType = bgScanJobRef.current.scanType;
+          const faceOff = data.enableFaceSearch === false;
+          const bibOff = data.enableBibSearch === false;
+
+          if ((activeType === 'face' && faceOff) || 
+              (activeType === 'bib' && bibOff) ||
+              (faceOff && bibOff) ||
+              (!activeType && (faceOff || bibOff))) {
+            console.log('[BgScan] Toggles updated. Stopping current scan.');
+            bgStopRef.current = true;
+          }
+        }
+      }
+    };
     return () => channelRef.current?.close();
   }, []);
 
@@ -65,7 +84,7 @@ export default function AdminLayout({ children }) {
     }
   }, [faceApiReady]);
 
-  const runBackgroundScan = useCallback(async (event, photoList) => {
+  const runBackgroundScan = useCallback(async (event, photoList, scanType = null) => {
     if (bgScanRunning.current) return;
     bgScanRunning.current = true;
     bgStopRef.current = false;
@@ -76,17 +95,34 @@ export default function AdminLayout({ children }) {
       return;
     }
 
-    const alreadyIndexedIds = new Set((event.indexedPhotos || []).map(p => p.id));
-    const toScan = photoList.filter(p => !alreadyIndexedIds.has(p.id));
+    const currentIndexedMap = new Map((event.indexedPhotos || []).map(p => [p.id, p]));
+    const toScan = photoList.filter(p => {
+      const dbPhoto = currentIndexedMap.get(p.id);
+      if (scanType === 'face') {
+        return !dbPhoto;
+      } else if (scanType === 'bib') {
+        return !dbPhoto || !dbPhoto.ocr;
+      } else {
+        return !dbPhoto || !dbPhoto.ocr;
+      }
+    });
     if (toScan.length === 0) { bgScanRunning.current = false; return; }
 
-    const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+
+
+    // Use 608px for high accuracy face detection in both modes (so we always locate the torso correctly)
+    const detectorSize = 608;
+    const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: detectorSize, scoreThreshold: 0.35 });
     let batch = [];
     let done = 0;
     const scanStartTime = Date.now();
 
-    const jobBase = { eventId: event._id, eventTitle: event.title, progress: 0, total: toScan.length, done: false, eta: '' };
+    const startingFaceCount = (event.indexedPhotos || []).length;
+    const startingBibCount = (event.indexedPhotos || []).filter(p => p.ocr === true).length;
+
+    const jobBase = { eventId: event._id, eventTitle: event.title, progress: 0, total: toScan.length, done: false, eta: '', scanType, startingFaceCount, startingBibCount };
     setBgScanJob(jobBase);
+    bgScanJobRef.current = jobBase;
     broadcast(jobBase);
 
     for (let i = 0; i < toScan.length; i++) {
@@ -94,24 +130,81 @@ export default function AdminLayout({ children }) {
 
       const photo = toScan[i];
       try {
-        const proxyUrl = `/api/proxy-image?id=${photo.id}&sz=w400`;
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = proxyUrl;
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error('Load failed'));
+        let faceDescriptors = [];
+        let bibs = [];
+        const dbPhoto = currentIndexedMap.get(photo.id);
+        const existingBibs = dbPhoto?.bibs || [];
+        const existingOcr = dbPhoto?.ocr || false;
+        let isOcrDone = existingOcr;
+
+        if (scanType === 'bib') {
+          // Backend BIB Scan API
+          const res = await fetch('/api/admin/scan-bib', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              eventId: event._id,
+              driveFileId: photo.id,
+              photoName: photo.name,
+              thumbnailLink: photo.thumbnailLink,
+              webContentLink: photo.webContentLink,
+            }),
+          });
+
+          if (!res.ok) {
+            throw new Error(`Gagal memproses BIB di backend: ${res.statusText}`);
+          }
+          const result = await res.json();
+          if (!result.success) {
+            throw new Error(result.error || 'Gagal memproses BIB di backend');
+          }
+          bibs = result.data;
+          isOcrDone = true;
+          faceDescriptors = dbPhoto?.faceDescriptors || [];
+        } else {
+          // Frontend Face Scan
+          const proxyUrl = `/api/proxy-image?id=${photo.id}&sz=w800`;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = proxyUrl;
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error('Load failed'));
+          });
+
+          const detections = await faceapi
+            .detectAllFaces(img, detectorOptions)
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+          faceDescriptors = detections.map(d => Array.from(d.descriptor));
+          bibs = existingBibs;
+          isOcrDone = existingOcr;
+        }
+
+        const finalFaceDescriptors = faceDescriptors.length > 0
+          ? faceDescriptors
+          : (dbPhoto?.faceDescriptors || []);
+
+        batch.push({
+          id: photo.id,
+          name: photo.name,
+          thumbnailLink: photo.thumbnailLink || '',
+          webContentLink: photo.webContentLink || '',
+          faceDescriptors: finalFaceDescriptors,
+          bibs,
+          ocr: isOcrDone
         });
-
-        const detections = await faceapi
-          .detectAllFaces(img, detectorOptions)
-          .withFaceLandmarks()
-          .withFaceDescriptors();
-
-        const faceDescriptors = detections.map(d => Array.from(d.descriptor));
-        batch.push({ id: photo.id, name: photo.name, thumbnailLink: photo.thumbnailLink, webContentLink: photo.webContentLink, faceDescriptors });
       } catch (_) {
-        batch.push({ id: photo.id, name: photo.name, thumbnailLink: photo.thumbnailLink || '', webContentLink: photo.webContentLink || '', faceDescriptors: [] });
+        const dbPhoto = currentIndexedMap.get(photo.id);
+        batch.push({
+          id: photo.id,
+          name: photo.name,
+          thumbnailLink: photo.thumbnailLink || '',
+          webContentLink: photo.webContentLink || '',
+          faceDescriptors: dbPhoto?.faceDescriptors || [],
+          bibs: dbPhoto?.bibs || [],
+          ocr: dbPhoto?.ocr || false
+        });
       }
 
       done++;
@@ -141,6 +234,8 @@ export default function AdminLayout({ children }) {
       }
     }
 
+
+
     bgScanRunning.current = false;
     const doneState = { eventId: event._id, eventTitle: event.title, progress: done, total: toScan.length, done: true, eta: '' };
     setBgScanJob(doneState);
@@ -157,9 +252,16 @@ export default function AdminLayout({ children }) {
       if (!res.ok) return;
       const json = await res.json();
       const events = json.data || [];
-      const needScan = events.filter(ev =>
-        (ev.drivePhotosCount || 0) > (ev.indexedPhotos || []).length
-      );
+      const needScan = events.filter(ev => {
+        const driveCount = ev.drivePhotosCount || 0;
+        const faceCount = ev.indexedPhotosCount ?? (ev.indexedPhotos ? ev.indexedPhotos.length : 0);
+        const bibCount = ev.bibIndexedCount ?? (ev.indexedPhotos ? ev.indexedPhotos.filter(p => p.ocr === true).length : 0);
+        
+        const needsFaceScan = (ev.enableFaceSearch !== false) && (driveCount > faceCount);
+        const needsBibScan = (ev.enableBibSearch !== false) && (driveCount > bibCount);
+        
+        return needsFaceScan || needsBibScan;
+      });
       if (needScan.length === 0) return;
 
       const event = needScan[0];
@@ -168,7 +270,21 @@ export default function AdminLayout({ children }) {
       const photosJson = await photosRes.json();
       const photos = photosJson.photos || [];
       if (photos.length > 0) {
-        await runBackgroundScan({ ...event, indexedPhotos: event.indexedPhotos || [] }, photos);
+        let scanType = null;
+        const faceCount = event.indexedPhotosCount ?? (event.indexedPhotos ? event.indexedPhotos.length : 0);
+        const bibCount = event.bibIndexedCount ?? (event.indexedPhotos ? event.indexedPhotos.filter(p => p.ocr === true).length : 0);
+        const driveCount = event.drivePhotosCount || 0;
+
+        const needsFace = (event.enableFaceSearch !== false) && (driveCount > faceCount);
+        const needsBib = (event.enableBibSearch !== false) && (driveCount > bibCount);
+
+        if (needsFace && !needsBib) {
+          scanType = 'face';
+        } else if (needsBib && !needsFace) {
+          scanType = 'bib';
+        }
+
+        await runBackgroundScan({ ...event, indexedPhotos: event.indexedPhotos || [] }, photos, scanType);
       }
     } catch (err) {
       console.error('[BgScan] startNextIfNeeded error:', err);
@@ -188,6 +304,29 @@ export default function AdminLayout({ children }) {
     }
   }, [faceApiReady, startNextIfNeeded, pathname]);
 
+  // Handle manual background scan triggers from dashboard
+  useEffect(() => {
+    window.triggerBgScan = (event, type) => {
+      bgStopRef.current = true;
+      setTimeout(async () => {
+        try {
+          const photosRes = await fetch(`/api/admin/events?slug=${event.slug}&photos=1`);
+          if (!photosRes.ok) return;
+          const photosJson = await photosRes.json();
+          const photos = photosJson.photos || [];
+          if (photos.length > 0) {
+            await runBackgroundScan({ ...event, indexedPhotos: event.indexedPhotos || [] }, photos, type);
+          }
+        } catch (err) {
+          console.error('[BgScan Trigger] Error:', err);
+        }
+      }, 500);
+    };
+    return () => {
+      delete window.triggerBgScan;
+    };
+  }, [runBackgroundScan]);
+
   const pct = bgScanJob && bgScanJob.total > 0
     ? Math.round((bgScanJob.progress / bgScanJob.total) * 100)
     : 0;
@@ -199,6 +338,7 @@ export default function AdminLayout({ children }) {
         strategy="afterInteractive"
         onLoad={() => loadFaceApiModels()}
       />
+
 
       {children}
 

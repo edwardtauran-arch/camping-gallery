@@ -10,8 +10,9 @@ const getEventThumbnailUrl = (event) => {
     }
     return `/api/proxy-image?id=${event.thumbnail}&sz=w400`;
   }
-  if (event.indexedPhotos && event.indexedPhotos.length > 0) {
-    return `/api/proxy-image?id=${event.indexedPhotos[0].id}&sz=w400`;
+  // firstPhotoId is sent by the lean aggregate API (replaces indexedPhotos[0].id)
+  if (event.firstPhotoId) {
+    return `/api/proxy-image?id=${event.firstPhotoId}&sz=w400`;
   }
   return null;
 };
@@ -19,8 +20,8 @@ const getEventThumbnailUrl = (event) => {
 export default function AdminDashboard() {
   const router = useRouter();
   const [events, setEvents] = useState([]);
-  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
-  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
+  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
+  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -34,10 +35,22 @@ export default function AdminDashboard() {
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerTarget, setPickerTarget] = useState(null);
 
+  // Custom Delete Modal State
+  const [deleteId, setDeleteId] = useState(null);
+  const [deleteEventTitle, setDeleteEventTitle] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // Edit Confirmation Modal State
+  const [isEditConfirmOpen, setIsEditConfirmOpen] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
   // Receive scan progress from admin layout via BroadcastChannel
   const [bgScanJob, setBgScanJob] = useState(null);
   const [realtimeCounts, setRealtimeCounts] = useState({});
+  const [realtimeBibCounts, setRealtimeBibCounts] = useState({});
   const scanStartsRef = useRef({});
+  const bibScanStartsRef = useRef({});
   const eventsRef = useRef(events);
 
   useEffect(() => {
@@ -54,26 +67,43 @@ export default function AdminDashboard() {
         setBgScanJob(data);
 
         if (data.eventId && data.progress !== undefined) {
-          // Initialize starting DB count if not present
-          if (scanStartsRef.current[data.eventId] === undefined) {
-            const eventObj = eventsRef.current.find(ev => ev._id === data.eventId);
-            scanStartsRef.current[data.eventId] = eventObj?.indexedPhotos ? eventObj.indexedPhotos.length : 0;
+          if (data.scanType === 'bib' || data.scanType == null) {
+            // Track BIB count in real-time using authoritative startingBibCount from layout
+            if (bibScanStartsRef.current[data.eventId] === undefined) {
+              if (data.startingBibCount !== undefined) {
+                // Use the value sent by layout (most accurate - from event.indexedPhotos at scan start)
+                bibScanStartsRef.current[data.eventId] = data.startingBibCount;
+              } else {
+                const eventObj = eventsRef.current.find(ev => ev._id === data.eventId);
+                bibScanStartsRef.current[data.eventId] = eventObj?.indexedPhotos
+                  ? eventObj.indexedPhotos.filter(p => p.ocr === true).length
+                  : 0;
+              }
+            }
+            const currentBib = bibScanStartsRef.current[data.eventId] + data.progress;
+            setRealtimeBibCounts(prev => ({ ...prev, [data.eventId]: currentBib }));
           }
-          
-          const currentCount = scanStartsRef.current[data.eventId] + data.progress;
-          setRealtimeCounts(prev => ({
-            ...prev,
-            [data.eventId]: currentCount
-          }));
+
+          if (data.scanType === 'face' || data.scanType == null) {
+            // Track Face count in real-time using authoritative startingFaceCount from layout
+            if (scanStartsRef.current[data.eventId] === undefined) {
+              if (data.startingFaceCount !== undefined) {
+                scanStartsRef.current[data.eventId] = data.startingFaceCount;
+              } else {
+                const eventObj = eventsRef.current.find(ev => ev._id === data.eventId);
+                scanStartsRef.current[data.eventId] = eventObj?.indexedPhotosCount ?? (eventObj?.indexedPhotos ? eventObj.indexedPhotos.length : 0);
+              }
+            }
+            const currentCount = scanStartsRef.current[data.eventId] + data.progress;
+            setRealtimeCounts(prev => ({ ...prev, [data.eventId]: currentCount }));
+          }
         }
 
         if (data.done) {
           delete scanStartsRef.current[data.eventId];
-          setRealtimeCounts(prev => {
-            const copy = { ...prev };
-            delete copy[data.eventId];
-            return copy;
-          });
+          delete bibScanStartsRef.current[data.eventId];
+          setRealtimeCounts(prev => { const c = { ...prev }; delete c[data.eventId]; return c; });
+          setRealtimeBibCounts(prev => { const c = { ...prev }; delete c[data.eventId]; return c; });
           fetchEvents();
         }
       }
@@ -103,6 +133,15 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleTriggerBgScan = (event, type) => {
+    if (window.triggerBgScan) {
+      window.triggerBgScan(event, type);
+      alert(`🚀 Memulai pemindaian latar belakang (${type === 'face' ? 'Wajah' : 'BIB'}) untuk event "${event.title}".`);
+    } else {
+      alert('⚠️ Pemindai latar belakang sedang memuat atau tidak tersedia.');
+    }
+  };
+
   useEffect(() => { fetchEvents(); }, []);
 
   const slugify = (text) => text.toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-');
@@ -118,7 +157,7 @@ export default function AdminDashboard() {
       body: JSON.stringify(form)
     });
     if (res.ok) {
-      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
+      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
       setIsAddModalOpen(false);
       await fetchEvents();
     } else {
@@ -126,19 +165,42 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleEditSubmit = async (e) => {
+  const handleEditSubmit = (e) => {
     e.preventDefault();
-    const res = await fetch('/api/admin/events', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: editingId, ...editForm })
-    });
-    if (res.ok) {
-      alert('✅ Data Event Berhasil Diperbarui!');
-      cancelEdit();
-      fetchEvents();
-    } else {
-      alert('❌ Gagal memperbarui data.');
+    // Open confirmation modal instead of saving directly
+    setIsEditConfirmOpen(true);
+  };
+
+  const handleEditConfirm = async () => {
+    setIsUpdating(true);
+    try {
+      const res = await fetch('/api/admin/events', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editingId, ...editForm })
+      });
+      if (res.ok) {
+        // Broadcast settings update to Layout background scanner
+        try {
+          const channel = new BroadcastChannel('bg-scan-progress');
+          channel.postMessage({
+            type: 'event-updated',
+            eventId: editingId,
+            enableFaceSearch: editForm.enableFaceSearch,
+            enableBibSearch: editForm.enableBibSearch
+          });
+          channel.close();
+        } catch (_) {}
+        setIsEditConfirmOpen(false);
+        cancelEdit();
+        fetchEvents();
+      } else {
+        alert('❌ Gagal memperbarui data.');
+      }
+    } catch (err) {
+      alert('❌ Terjadi kesalahan jaringan.');
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -152,7 +214,9 @@ export default function AdminDashboard() {
       date: formattedDate,
       description: event.description || '',
       hidden: event.hidden || false,
-      thumbnail: event.thumbnail || ''
+      thumbnail: event.thumbnail || '',
+      enableFaceSearch: event.enableFaceSearch !== false,
+      enableBibSearch: event.enableBibSearch !== false
     });
     setIsEditModalOpen(true);
   };
@@ -160,7 +224,7 @@ export default function AdminDashboard() {
   const cancelEdit = () => {
     setEditingId(null);
     setIsEditModalOpen(false);
-    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '' });
+    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
   };
 
   const openThumbnailPicker = async (target, eventOrFolderId) => {
@@ -238,15 +302,35 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Apakah kamu yakin ingin menghapus kategori event camping ini beserta galeri fotonya?')) return;
-    const res = await fetch('/api/admin/events', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-    if (res.ok) {
-      alert('🗑️ Event berhasil dihapus!');
-      if (editingId === id) cancelEdit();
-      fetchEvents();
-    } else {
-      alert('❌ Gagal menghapus event.');
+  const triggerDelete = (event) => {
+    setDeleteId(event._id);
+    setDeleteEventTitle(event.title);
+    setIsDeleteModalOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteId) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch('/api/admin/events', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: deleteId })
+      });
+      if (res.ok) {
+        setIsDeleteModalOpen(false);
+        if (editingId === deleteId) cancelEdit();
+        await fetchEvents();
+      } else {
+        alert('❌ Gagal menghapus event.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('❌ Terjadi kesalahan saat menghapus.');
+    } finally {
+      setIsDeleting(false);
+      setDeleteId(null);
+      setDeleteEventTitle('');
     }
   };
 
@@ -274,8 +358,8 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/events', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'sync' }) });
       const json = await res.json();
       if (json.success) {
-        setEvents(prev => prev.map(ev => ev._id === id ? { ...ev, drivePhotosCount: json.data.drivePhotosCount } : ev));
-        alert('🔄 Sinkronisasi berhasil!');
+        fetchEvents(); // Ambil ulang data event untuk memperbarui hitungan indeks
+        alert('🔄 Sinkronisasi berhasil! Data foto usang juga telah dibersihkan dari indeks.');
       } else { alert('❌ Gagal sinkronisasi.'); }
     } catch { alert('❌ Terjadi kesalahan.'); }
     finally { setSyncingId(null); }
@@ -345,7 +429,10 @@ export default function AdminDashboard() {
               const driveCount = event.drivePhotosCount || 0;
               const currentIndexedCount = realtimeCounts[event._id] !== undefined
                 ? realtimeCounts[event._id]
-                : (event.indexedPhotos ? event.indexedPhotos.length : 0);
+                : (event.indexedPhotosCount ?? (event.indexedPhotos ? event.indexedPhotos.length : 0));
+              const currentBibCount = realtimeBibCounts[event._id] !== undefined
+                ? realtimeBibCounts[event._id]
+                : (event.bibIndexedCount ?? (event.indexedPhotos ? event.indexedPhotos.filter(p => p.ocr === true).length : 0));
               const isScanning = bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done;
               const scanDone = bgScanJob && bgScanJob.eventId === event._id && bgScanJob.done;
               return (
@@ -398,14 +485,33 @@ export default function AdminDashboard() {
                         <span className="font-semibold text-slate-400">Folder ID:</span>
                         <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-mono text-[10px] truncate max-w-[120px]" title={event.driveFolderId}>{event.driveFolderId}</code>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-slate-400">Status AI:</span>
-                        {currentIndexedCount > 0 ? (
-                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full">
-                            ✅ Terindeks ({currentIndexedCount}/{driveCount})
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠️ Belum Terindeks</span>
+                      <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                        {event.enableFaceSearch !== false && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-slate-400">Indeks Wajah:</span>
+                            {currentIndexedCount > 0 ? (
+                              <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-md">
+                                ✅ {currentIndexedCount}/{driveCount} Foto
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-md">⚠️ Belum Scan</span>
+                            )}
+                          </div>
+                        )}
+                        {event.enableBibSearch !== false && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-slate-400">Indeks BIB:</span>
+                            {currentBibCount > 0 ? (
+                              <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded-md">
+                                🔢 {currentBibCount}/{driveCount} Foto
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-md">⚠️ Belum Scan</span>
+                            )}
+                          </div>
+                        )}
+                        {event.enableFaceSearch === false && event.enableBibSearch === false && (
+                          <div className="text-center text-slate-400 text-[11px] py-1">Fitur Dinonaktifkan</div>
                         )}
                       </div>
                     </div>
@@ -461,17 +567,39 @@ export default function AdminDashboard() {
                         title="Buka Halaman Galeri">
                         <ExternalLink size={15} className="flex-shrink-0" />
                       </a>
-                      <a href={`/admin/scan/${event.slug}`}
-                        className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-600 shadow-sm transition-all"
-                        title="Scan Wajah AI">
-                        <Cpu size={15} className="flex-shrink-0" />
-                      </a>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {event.enableFaceSearch !== false && (
+                          <button
+                            onClick={() => handleTriggerBgScan(event, 'face')}
+                            className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white shadow-sm transition-all"
+                            title="Scan Wajah AI (Latar Belakang)"
+                          >
+                            <Cpu size={14} className="flex-shrink-0" />
+                            <span className="text-[10px] ml-1 font-bold">Wajah</span>
+                          </button>
+                        )}
+                        {event.enableBibSearch !== false && (
+                          <button
+                            onClick={() => handleTriggerBgScan(event, 'bib')}
+                            className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white shadow-sm transition-all"
+                            title="Scan BIB (Latar Belakang)"
+                          >
+                            <Cpu size={14} className="flex-shrink-0" />
+                            <span className="text-[10px] ml-1 font-bold">BIB</span>
+                          </button>
+                        )}
+                        <a href={`/admin/scan/${event.slug}`}
+                          className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
+                          title="Halaman Monitoring Detail Scan">
+                          Monitor
+                        </a>
+                      </div>
                       <button onClick={() => startEdit(event)}
                         className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
                         title="Ubah Data Event">
                         <Pencil size={15} className="flex-shrink-0" />
                       </button>
-                      <button onClick={() => handleDelete(event._id)}
+                      <button onClick={() => triggerDelete(event)}
                         className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 transition-all"
                         title="Hapus Kategori">
                         <Trash2 size={15} className="flex-shrink-0" />
@@ -491,7 +619,7 @@ export default function AdminDashboard() {
                   <th className="px-6 py-4">Event / Kategori</th>
                   <th className="px-6 py-4">Tanggal</th>
                   <th className="px-6 py-4">Google Drive</th>
-                  <th className="px-6 py-4">Status AI</th>
+                  <th className="px-6 py-4">Status Indeks</th>
                   <th className="px-6 py-4">Visibilitas</th>
                   <th className="px-6 py-4 text-right">Aksi</th>
                 </tr>
@@ -501,7 +629,10 @@ export default function AdminDashboard() {
                   const driveCount = event.drivePhotosCount || 0;
                   const currentIndexedCount = realtimeCounts[event._id] !== undefined
                     ? realtimeCounts[event._id]
-                    : (event.indexedPhotos ? event.indexedPhotos.length : 0);
+                    : (event.indexedPhotosCount ?? (event.indexedPhotos ? event.indexedPhotos.length : 0));
+                  const currentBibCount = realtimeBibCounts[event._id] !== undefined
+                    ? realtimeBibCounts[event._id]
+                    : (event.bibIndexedCount ?? (event.indexedPhotos ? event.indexedPhotos.filter(p => p.ocr === true).length : 0));
                   return (
                     <tr key={event._id} className={`hover:bg-slate-50/55 transition-colors ${editingId === event._id ? 'bg-amber-50/20' : ''}`}>
                       <td className={`px-6 py-4 transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
@@ -550,11 +681,21 @@ export default function AdminDashboard() {
                         </div>
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
-                        {currentIndexedCount > 0 ? (
-                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">✅ Terindeks ({currentIndexedCount})</span>
-                        ) : (
-                          <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">⚠️ Belum Scan</span>
-                        )}
+                        <div className="space-y-1 font-medium text-xs">
+                          {event.enableFaceSearch !== false && (
+                            <div className="flex items-center gap-1">
+                              👤 Wajah: <span className={currentIndexedCount > 0 ? 'text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200' : 'text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200'}>{currentIndexedCount}/{driveCount}</span>
+                            </div>
+                          )}
+                          {event.enableBibSearch !== false && (
+                            <div className="flex items-center gap-1">
+                              🔢 BIB: <span className={currentBibCount > 0 ? 'text-indigo-700 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200' : 'text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200'}>{currentBibCount}/{driveCount}</span>
+                            </div>
+                          )}
+                          {event.enableFaceSearch === false && event.enableBibSearch === false && (
+                            <span className="text-slate-400 text-[10px]">Fitur Dinonaktifkan</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2 select-none cursor-default" title={event.hidden ? 'Tersembunyi' : 'Tampil'}>
@@ -569,13 +710,33 @@ export default function AdminDashboard() {
                           <a href={`/gallery/${event.slug}`} target="_blank" rel="noopener noreferrer"
                             className="inline-flex items-center justify-center p-1.5 bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 rounded text-xs transition-colors"
                             title="Buka galeri publik"><ExternalLink size={12} /></a>
+                          {event.enableFaceSearch !== false && (
+                            <button
+                              onClick={() => handleTriggerBgScan(event, 'face')}
+                              className="inline-flex items-center justify-center p-1.5 bg-emerald-700 text-white hover:bg-emerald-600 rounded text-xs transition-colors gap-1"
+                              title="Scan Wajah AI (Latar Belakang)"
+                            >
+                              <Cpu size={12} />
+                              <span className="text-[9px] font-bold">Wajah</span>
+                            </button>
+                          )}
+                          {event.enableBibSearch !== false && (
+                            <button
+                              onClick={() => handleTriggerBgScan(event, 'bib')}
+                              className="inline-flex items-center justify-center p-1.5 bg-indigo-700 text-white hover:bg-indigo-600 rounded text-xs transition-colors gap-1"
+                              title="Scan BIB (Latar Belakang)"
+                            >
+                              <Cpu size={12} />
+                              <span className="text-[9px] font-bold">BIB</span>
+                            </button>
+                          )}
                           <a href={`/admin/scan/${event.slug}`}
-                            className="inline-flex items-center justify-center p-1.5 bg-emerald-700 text-white hover:bg-emerald-600 rounded text-xs transition-colors"
-                            title="Scan Wajah"><Cpu size={12} /></a>
+                            className="inline-flex items-center justify-center p-1.5 bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 rounded text-xs transition-colors"
+                            title="Monitor Detail Scan">🔍</a>
                           <button onClick={() => startEdit(event)}
                             className="inline-flex items-center justify-center p-1.5 bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 rounded text-xs transition-colors"
                             title="Ubah"><Pencil size={12} /></button>
-                          <button onClick={() => handleDelete(event._id)}
+                          <button onClick={() => triggerDelete(event)}
                             className="inline-flex items-center justify-center p-1.5 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 hover:text-blue-700 rounded text-xs transition-colors"
                             title="Hapus"><Trash2 size={12} /></button>
                         </div>
@@ -645,22 +806,119 @@ export default function AdminDashboard() {
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">Kosongkan jika ingin menggunakan foto pertama yang terindeks secara otomatis.</p>
               </div>
-              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
-                <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
-                <button type="button" onClick={() => setEditForm({ ...editForm, hidden: !editForm.hidden })} className="flex items-center gap-2 group focus:outline-none">
-                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${editForm.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${editForm.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
-                  </div>
-                  <span className={`text-[11px] font-semibold transition-colors ${editForm.hidden ? 'text-slate-500' : 'text-emerald-700 font-bold'}`}>
-                    {editForm.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
-                  </span>
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                {/* Visibilitas */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Visibilitas Galeri:</span>
+                  <button type="button" onClick={() => setEditForm({ ...editForm, hidden: !editForm.hidden })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${editForm.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${editForm.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {editForm.hidden ? 'Tersembunyi' : 'Tampil Publik'}
+                    </span>
+                  </button>
+                </div>
+                {/* Face Search */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Fitur Cari Wajah AI:</span>
+                  <button type="button" onClick={() => setEditForm({ ...editForm, enableFaceSearch: !editForm.enableFaceSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!editForm.enableFaceSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!editForm.enableFaceSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {editForm.enableFaceSearch ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                  </button>
+                </div>
+                {/* BIB Search */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Fitur Cari BIB:</span>
+                  <button type="button" onClick={() => setEditForm({ ...editForm, enableBibSearch: !editForm.enableBibSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!editForm.enableBibSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!editForm.enableBibSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {editForm.enableBibSearch ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                  </button>
+                </div>
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button type="button" onClick={cancelEdit} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"><XCircle size={16} /> Batal</button>
                 <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors">Perbarui Data Event</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Confirmation Modal */}
+      {isEditConfirmOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="flex items-center gap-3 px-6 pt-6 pb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <Pencil size={18} className="text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Konfirmasi Perubahan?</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Periksa ringkasan data sebelum menyimpan.</p>
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div className="mx-6 mb-5 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Nama Event</span>
+                <span className="font-bold text-slate-800 text-right max-w-[55%] truncate">{editForm.title}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Tanggal</span>
+                <span className="font-semibold text-slate-700">{editForm.date ? new Date(editForm.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Visibilitas</span>
+                <span className={`font-semibold ${editForm.hidden ? 'text-slate-500' : 'text-emerald-600'}`}>{editForm.hidden ? 'Tersembunyi' : 'Tampil Publik'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Cari Wajah AI</span>
+                <span className={`font-semibold ${editForm.enableFaceSearch ? 'text-emerald-600' : 'text-slate-400'}`}>{editForm.enableFaceSearch ? 'Aktif' : 'Nonaktif'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Cari BIB</span>
+                <span className={`font-semibold ${editForm.enableBibSearch ? 'text-emerald-600' : 'text-slate-400'}`}>{editForm.enableBibSearch ? 'Aktif' : 'Nonaktif'}</span>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 px-6 pb-6">
+              <button
+                onClick={() => setIsEditConfirmOpen(false)}
+                disabled={isUpdating}
+                className="flex-1 py-2.5 px-4 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-bold text-sm rounded-xl transition-colors disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleEditConfirm}
+                disabled={isUpdating}
+                className="flex-1 py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-70 shadow-sm"
+              >
+                {isUpdating ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={15} />
+                    <span>Ya, Simpan Perubahan</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -721,16 +979,43 @@ export default function AdminDashboard() {
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">Kosongkan jika ingin menggunakan foto pertama yang terindeks secara otomatis.</p>
               </div>
-              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 w-fit">
-                <span className="text-xs font-semibold text-slate-700">Status Visibilitas:</span>
-                <button type="button" onClick={() => setForm({ ...form, hidden: !form.hidden })} className="flex items-center gap-2 group focus:outline-none">
-                  <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${form.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                    <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${form.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
-                  </div>
-                  <span className={`text-[11px] font-semibold transition-colors ${form.hidden ? 'text-slate-500' : 'text-emerald-700 font-bold'}`}>
-                    {form.hidden ? 'Sembunyikan dari Publik' : 'Tampilkan di Publik'}
-                  </span>
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                {/* Visibilitas */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Visibilitas Galeri:</span>
+                  <button type="button" onClick={() => setForm({ ...form, hidden: !form.hidden })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${form.hidden ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${form.hidden ? 'left-[3px]' : 'left-[21px]'}`} />
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {form.hidden ? 'Tersembunyi' : 'Tampil Publik'}
+                    </span>
+                  </button>
+                </div>
+                {/* Face Search */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Fitur Cari Wajah AI:</span>
+                  <button type="button" onClick={() => setForm({ ...form, enableFaceSearch: !form.enableFaceSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!form.enableFaceSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!form.enableFaceSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {form.enableFaceSearch !== false ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                  </button>
+                </div>
+                {/* BIB Search */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Fitur Cari BIB:</span>
+                  <button type="button" onClick={() => setForm({ ...form, enableBibSearch: !form.enableBibSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!form.enableBibSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!form.enableBibSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {form.enableBibSearch !== false ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                  </button>
+                </div>
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button type="button" onClick={() => setIsAddModalOpen(false)} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"><XCircle size={16} /> Batal</button>
@@ -753,6 +1038,54 @@ export default function AdminDashboard() {
         onSelect={handleSelectThumbnail}
         event={pickerTarget === 'db' ? activePickerEvent : { title: 'Event Baru' }}
       />
+
+      {/* Custom Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 w-full max-w-md rounded-2xl overflow-hidden shadow-2xl flex flex-col p-6 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex flex-col items-center text-center">
+              {/* Warning Icon with pulse animation */}
+              <div className="w-14 h-14 bg-rose-50 border border-rose-100 rounded-full flex items-center justify-center text-rose-500 mb-4 animate-pulse">
+                <Trash2 size={28} />
+              </div>
+              
+              <h3 className="font-bold text-slate-800 text-lg mb-2">Hapus Kategori Event?</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Apakah Anda yakin ingin menghapus kategori event <span className="font-bold text-slate-700">"{deleteEventTitle}"</span> beserta seluruh data galeri fotonya? Tindakan ini tidak dapat dibatalkan.
+              </p>
+            </div>
+
+            {/* Progress/Loading Loader */}
+            {isDeleting ? (
+              <div className="flex flex-col items-center justify-center py-4 space-y-2">
+                <Loader2 className="h-8 w-8 text-rose-500 animate-spin" />
+                <span className="text-xs font-bold text-slate-600 animate-pulse">Sedang menghapus event...</span>
+              </div>
+            ) : (
+              <div className="flex gap-3 justify-stretch mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDeleteModalOpen(false);
+                    setDeleteId(null);
+                    setDeleteEventTitle('');
+                  }}
+                  className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl transition-all active:scale-[0.98]"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow transition-all active:scale-[0.98]"
+                >
+                  Ya, Hapus Event
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

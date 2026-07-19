@@ -76,6 +76,8 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
   const [allScores, setAllScores] = useState({}); // id -> minDistance
 
   // Search results filter
+  const [searchMode, setSearchMode] = useState(null); // 'ai' | 'bib' | null
+  const [bibSearchQuery, setBibSearchQuery] = useState('');
   const [matchedPhotoIds, setMatchedPhotoIds] = useState(null);
   const [matchingScores, setMatchingScores] = useState({});
 
@@ -95,7 +97,7 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
   // Pagination reset
   useEffect(() => {
     setCurrentPage(1);
-  }, [photos.length, photosPerPage, matchedPhotoIds]);
+  }, [photos.length, photosPerPage, matchedPhotoIds, bibSearchQuery]);
 
   // Camera cleanup
   useEffect(() => {
@@ -127,11 +129,37 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
   };
 
   // Filter & sort
-  const filteredPhotos = matchedPhotoIds
-    ? photos
-        .filter(p => matchedPhotoIds.has(p.id))
-        .sort((a, b) => (allScores[a.id] ?? 1.0) - (allScores[b.id] ?? 1.0))
-    : photos;
+  let filteredPhotos = photos;
+  if (searchMode === 'ai' && matchedPhotoIds) {
+    filteredPhotos = photos
+      .filter(p => matchedPhotoIds.has(p.id))
+      .sort((a, b) => (allScores[a.id] ?? 1.0) - (allScores[b.id] ?? 1.0));
+  } else if (searchMode === 'bib' && bibSearchQuery.trim()) {
+    const qRaw = bibSearchQuery.trim().toLowerCase();
+    const qClean = qRaw.replace(/[^0-9]/g, '');
+    
+    // Cari ID foto dari event.indexedPhotos yang mengandung nomor BIB pencarian
+    const matchedIds = new Set(
+      (event.indexedPhotos || [])
+        .filter(p => {
+          if (!p.bibs) return false;
+          return p.bibs.some(b => {
+            const bRaw = b.toLowerCase();
+            const bClean = bRaw.replace(/[^0-9]/g, '');
+
+            // 1. Raw string substring match (e.g. "m22926" includes "m22")
+            if (bRaw.includes(qRaw)) return true;
+
+            // 2. Digit-only substring match (e.g. "22926" includes "292", or "22926" includes "22926" if user searched "M22926")
+            if (qClean && bClean.includes(qClean)) return true;
+
+            return false;
+          });
+        })
+        .map(p => p.id)
+    );
+    filteredPhotos = photos.filter(p => matchedIds.has(p.id));
+  }
 
   const indexOfLastPhoto = currentPage * photosPerPage;
   const indexOfFirstPhoto = indexOfLastPhoto - photosPerPage;
@@ -226,6 +254,7 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
     setMatchingScores({});
     setAllScores({});
     setUserDescriptor(null);
+    setBibSearchQuery('');
 
     try {
       const faceapi = window.faceapi;
@@ -276,6 +305,7 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
 
       setAllScores(scores);
       applyThreshold(scores, threshold);
+      setSearchMode('ai');
       setSearchModalOpen(false);
     } catch (err) {
       console.error(err);
@@ -291,6 +321,8 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
     setMatchingScores({});
     setAllScores({});
     setUserDescriptor(null);
+    setBibSearchQuery('');
+    setSearchMode(null);
     setCurrentPage(1);
   };
 
@@ -319,7 +351,7 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
       <Script src="/js/face-api.js" strategy="lazyOnload" />
 
       {/* ── Threshold Control Bar (visible after search) ── */}
-      {userDescriptor && (
+      {searchMode === 'ai' && userDescriptor && (
         <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-sm space-y-2 sm:space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2">
             <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-700">
@@ -364,8 +396,8 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
         </div>
       )}
 
-      {/* ── Result Banner ── */}
-      {matchedPhotoIds && (
+      {/* ── AI Result Banner ── */}
+      {searchMode === 'ai' && matchedPhotoIds && (
         <div className={`border rounded-xl p-3 sm:p-4 flex flex-col gap-3 shadow-sm ${
           filteredPhotos.length > 0
             ? 'bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border-emerald-400/40'
@@ -399,46 +431,162 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
         </div>
       )}
 
-      {/* ── Toolbar ── */}
-      <div className="flex flex-col gap-3">
-        {/* Row 1: Info + Search button */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div className="text-xs sm:text-sm text-slate-500">
-            Menampilkan{' '}
-            <span className="font-semibold text-slate-800">
-              {filteredPhotos.length === 0 ? 0 : indexOfFirstPhoto + 1}–{Math.min(indexOfLastPhoto, filteredPhotos.length)}
-            </span>{' '}
-            dari <span className="font-semibold text-slate-800">{filteredPhotos.length}</span> foto
-            {matchedPhotoIds && <span className="ml-1.5 text-[10px] sm:text-xs text-emerald-600 font-semibold">(difilter wajah)</span>}
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            {hasIndexedPhotos ? (
-              <button
-                onClick={() => setSearchModalOpen(true)}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-3 sm:px-4 py-2 rounded-lg shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] text-[11px] sm:text-xs"
-              >
-                🔍 {userDescriptor ? 'Cari Ulang' : 'Cari Foto Saya (AI)'}
-              </button>
-            ) : (
-              <div className="text-[10px] sm:text-[11px] text-slate-400 font-semibold bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg">
-                ℹ️ Pencarian Wajah Belum Siap
-              </div>
-            )}
-
-            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm text-[11px] sm:text-xs">
-              <span className="hidden sm:inline">Tampilkan:</span>
-              <select
-                value={photosPerPage}
-                onChange={(e) => { setPhotosPerPage(parseInt(e.target.value)); setCurrentPage(1); }}
-                className="bg-transparent font-medium text-slate-800 focus:outline-none cursor-pointer"
-              >
-                <option value={20}>20 Foto</option>
-                <option value={30}>30 Foto</option>
-                <option value={50}>50 Foto</option>
-              </select>
+      {/* ── BIB Result Banner ── */}
+      {searchMode === 'bib' && bibSearchQuery.trim() && (
+        <div className={`border rounded-xl p-3 sm:p-4 flex flex-col gap-3 shadow-sm ${
+          filteredPhotos.length > 0
+            ? 'bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border-indigo-400/40'
+            : 'bg-amber-50/60 border-amber-200'
+        }`}>
+          <div className="flex items-start sm:items-center gap-2">
+            <span className="text-base leading-none">✨</span>
+            <div className={`text-xs sm:text-sm font-semibold ${filteredPhotos.length > 0 ? 'text-indigo-800' : 'text-amber-700'}`}>
+              {filteredPhotos.length > 0
+                ? <>Menemukan <span className="font-extrabold">{filteredPhotos.length}</span> foto yang cocok dengan BIB &ldquo;<span className="font-extrabold">{bibSearchQuery}</span>&rdquo;.</>
+                : <>Tidak ditemukan foto yang mengandung BIB &ldquo;<strong>{bibSearchQuery}</strong>&rdquo;. Coba periksa kembali nomor Anda.</>
+              }
             </div>
           </div>
+          <div className="flex gap-2">
+            {filteredPhotos.length > 0 && (
+              <button
+                onClick={handleDownloadAll}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-indigo-700 hover:bg-indigo-600 text-white text-[11px] sm:text-xs font-bold px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg shadow transition-colors"
+              >
+                <Download size={14} /> Unduh Semua
+              </button>
+            )}
+            <button
+              onClick={handleClearSearch}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-[11px] sm:text-xs font-bold px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg transition-colors"
+            >
+              Batal Cari
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Search Control Section ── */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+          {/* Search Buttons Group */}
+          <div className="flex flex-col sm:flex-row gap-2.5 flex-grow max-w-2xl">
+            {/* Button 1: Cari Foto AI */}
+            {event?.enableFaceSearch !== false && (
+              hasIndexedPhotos ? (
+                <button
+                  onClick={() => {
+                    setSearchMode('ai');
+                    setSearchModalOpen(true);
+                  }}
+                  className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm transition-all hover:scale-[1.01] active:scale-[0.99] shadow-sm ${
+                    searchMode === 'ai'
+                      ? 'bg-emerald-700 hover:bg-emerald-600 text-white ring-2 ring-emerald-500/20'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}
+                >
+                  🔍 {userDescriptor ? 'Ubah Foto AI' : 'Cari Foto Saya (AI)'}
+                </button>
+              ) : (
+                <div className="text-xs font-semibold bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-slate-400 flex items-center justify-center gap-1.5">
+                  ℹ️ Pencarian AI Belum Siap
+                </div>
+              )
+            )}
+
+            {/* Button 2: Cari dengan BIB */}
+            {event?.enableBibSearch !== false && (
+              <button
+                onClick={() => {
+                  setSearchMode('bib');
+                }}
+                className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm transition-all hover:scale-[1.01] active:scale-[0.99] shadow-sm ${
+                  searchMode === 'bib'
+                    ? 'bg-indigo-700 hover:bg-indigo-600 text-white ring-2 ring-indigo-500/20'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}
+              >
+                🔢 Cari dengan BIB
+              </button>
+            )}
+
+            {/* Reset Button (only shown when query is active) */}
+            {(userDescriptor || (searchMode === 'bib' && bibSearchQuery)) && (
+              <button
+                onClick={handleClearSearch}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors shadow-sm"
+              >
+                🧹 Batal Cari
+              </button>
+            )}
+          </div>
+
+          {/* Right side: Photos per page */}
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 self-end sm:self-auto text-xs font-medium shadow-sm">
+            <span className="text-slate-500 font-semibold">Tampilkan:</span>
+            <select
+              value={photosPerPage}
+              onChange={(e) => { setPhotosPerPage(parseInt(e.target.value)); setCurrentPage(1); }}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value={20}>20 Foto</option>
+              <option value={30}>30 Foto</option>
+              <option value={50}>50 Foto</option>
+            </select>
+          </div>
+        </div>
+
+        {/* ── BIB Search Input Box ── */}
+        {searchMode === 'bib' && (
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50/50 border border-indigo-100 rounded-xl p-4 sm:p-5 shadow-sm space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="bibInput" className="text-xs sm:text-sm font-extrabold text-indigo-900 flex items-center gap-1.5">
+                Masukan Nomor BIB Anda
+              </label>
+              <div className="relative">
+                <input
+                  id="bibInput"
+                  type="text"
+                  value={bibSearchQuery}
+                  onChange={(e) => {
+                    setBibSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Ketik nomor BIB (contoh: 124, 085, dll)..."
+                  className="w-full bg-white border border-indigo-200 rounded-xl pl-4 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-bold tracking-wide text-slate-800 placeholder-indigo-300 transition-all shadow-sm"
+                  autoFocus
+                />
+                {bibSearchQuery && (
+                  <button
+                    onClick={() => {
+                      setBibSearchQuery('');
+                      setCurrentPage(1);
+                    }}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-indigo-700 font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+              Foto langsung disaring secara otomatis saat Anda mengetik, tanpa perlu menekan tombol Cari.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Toolbar / Results Info ── */}
+      <div className="text-xs sm:text-sm text-slate-500 flex justify-between items-center bg-slate-50/50 border border-slate-100 rounded-xl px-4 py-2.5 shadow-sm">
+        <div>
+          Menampilkan{' '}
+          <span className="font-extrabold text-slate-800">
+            {filteredPhotos.length === 0 ? 0 : indexOfFirstPhoto + 1}–{Math.min(indexOfLastPhoto, filteredPhotos.length)}
+          </span>{' '}
+          dari <span className="font-extrabold text-slate-800">{filteredPhotos.length}</span> foto
+          {searchMode === 'ai' && matchedPhotoIds && <span className="ml-2 text-[10px] sm:text-xs text-emerald-700 font-bold bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">(difilter wajah)</span>}
+          {searchMode === 'bib' && bibSearchQuery.trim() && <span className="ml-2 text-[10px] sm:text-xs text-indigo-700 font-bold bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">(difilter nomor BIB)</span>}
         </div>
       </div>
 
@@ -453,7 +601,7 @@ export default function GalleryClient({ photos, event, isPrivate = false }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-4">
           {currentPhotos.map((photo) => {
             const dist = allScores[photo.id];
-            const isMatch = matchedPhotoIds?.has(photo.id);
+            const isMatch = searchMode === 'ai' && matchedPhotoIds?.has(photo.id);
             // Score: map distance 0→100%, threshold→50%, beyond=excluded
             const scorePercent = isMatch && dist != null
               ? Math.min(99, Math.round(100 - (dist / threshold) * 50))

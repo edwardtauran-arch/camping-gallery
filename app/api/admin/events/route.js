@@ -42,7 +42,30 @@ export async function GET(request) {
       return NextResponse.json({ success: true, event, photos });
     }
 
-    const events = await Event.find({}).sort({ date: -1 });
+    // Lean aggregate: compute scalar counts server-side, strip heavy photo arrays entirely
+    const events = await Event.aggregate([
+      { $sort: { date: -1 } },
+      {
+        $project: {
+          _id: 1, title: 1, slug: 1, driveFolderId: 1, date: 1,
+          description: 1, hidden: 1, thumbnail: 1, drivePhotosCount: 1,
+          enableFaceSearch: 1, enableBibSearch: 1,
+          // Compute counts server-side (no array transfer)
+          indexedPhotosCount: { $size: { $ifNull: ['$indexedPhotos', []] } },
+          bibIndexedCount: {
+            $size: {
+              $filter: {
+                input: { $ifNull: ['$indexedPhotos', []] },
+                as: 'p',
+                cond: { $eq: ['$$p.ocr', true] }
+              }
+            }
+          },
+          // Only send the first photo ID for thumbnail fallback (not the whole array)
+          firstPhotoId: { $arrayElemAt: ['$indexedPhotos.id', 0] }
+        }
+      }
+    ]);
     return NextResponse.json({ success: true, data: events });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
@@ -78,7 +101,7 @@ export async function PUT(request) {
   try {
     const body = await request.json();
     console.log("[API EVENTS PUT] Received body:", body);
-    const { id, title, slug, driveFolderId, date, description, hidden, thumbnail } = body;
+    const { id, title, slug, driveFolderId, date, description, hidden, thumbnail, enableFaceSearch, enableBibSearch } = body;
     
     // Fetch Google Drive photo count once on update
     let drivePhotosCount = 0;
@@ -91,7 +114,18 @@ export async function PUT(request) {
 
     const updatedEvent = await Event.findByIdAndUpdate(
       id,
-      { title, slug, driveFolderId, date, description, hidden: !!hidden, drivePhotosCount, thumbnail },
+      { 
+        title, 
+        slug, 
+        driveFolderId, 
+        date, 
+        description, 
+        hidden: !!hidden, 
+        drivePhotosCount, 
+        thumbnail,
+        enableFaceSearch: enableFaceSearch !== undefined ? !!enableFaceSearch : true,
+        enableBibSearch: enableBibSearch !== undefined ? !!enableBibSearch : true
+      },
       { new: true } // Mengembalikan data terbaru setelah di-update
     );
     console.log("[API EVENTS PUT] Updated event in DB:", updatedEvent);
@@ -127,6 +161,13 @@ export async function PATCH(request) {
       // Sinkronisasi jumlah foto Google Drive on demand
       const photos = await getPhotosFromFolder(event.driveFolderId);
       event.drivePhotosCount = photos.length;
+      
+      // Clean up orphaned photos in database
+      if (event.indexedPhotos && event.indexedPhotos.length > 0) {
+        const drivePhotoIds = new Set(photos.map(p => p.id));
+        event.indexedPhotos = event.indexedPhotos.filter(p => drivePhotoIds.has(p.id));
+      }
+
       await event.save();
       return NextResponse.json({ success: true, data: { drivePhotosCount: event.drivePhotosCount } });
     } else {

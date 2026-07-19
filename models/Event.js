@@ -9,13 +9,17 @@ const EventSchema = new mongoose.Schema({
   hidden: { type: Boolean, default: false },
   drivePhotosCount: { type: Number, default: 0 },
   thumbnail: { type: String },
+  enableFaceSearch: { type: Boolean, default: true },
+  enableBibSearch: { type: Boolean, default: true },
   // Tambahan untuk menyimpan koordinat wajah hasil scan AI
   indexedPhotos: [{
     id: String,
     name: String,
     thumbnailLink: String,
     webContentLink: String,
-    faceDescriptors: [Array] // Menyimpan array koordinat wajah (Float32Array diubah ke Array biasa)
+    faceDescriptors: [Array], // Menyimpan array koordinat wajah (Float32Array diubah ke Array biasa)
+    bibs: [String], // Menyimpan nomor BIB yang terdeteksi di gambar
+    ocr: Boolean // Penanda apakah foto sudah dipindai oleh mesin OCR baru
   }]
 });
 
