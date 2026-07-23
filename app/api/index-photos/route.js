@@ -24,7 +24,7 @@ export async function POST(req) {
     });
 
     await dbConnect();
-    const { eventId, photos, reset, resetBib, resetFace } = await req.json();
+    const { eventId, photos, reset, resetBib, resetFace, updateType } = await req.json();
 
     if (!eventId) {
       return NextResponse.json({ error: 'eventId wajib diisi.' }, { status: 400 });
@@ -70,16 +70,25 @@ export async function POST(req) {
     
     for (const photo of photos) {
       if (existingIds.has(photo.id)) {
-        console.log(`- Bulk Update photo ${photo.id}: bibs: ${(photo.bibs || []).join(', ')}, ocr: ${photo.ocr}`);
+        console.log(`- Bulk Update photo ${photo.id}: updateType: ${updateType || 'all'}`);
+        let setUpdate = {};
+        if (updateType === 'face') {
+          setUpdate = { 'indexedPhotos.$.faceDescriptors': photo.faceDescriptors || [] };
+        } else if (updateType === 'bib') {
+          setUpdate = { 'indexedPhotos.$.bibs': photo.bibs || [], 'indexedPhotos.$.ocr': photo.ocr || false };
+        } else {
+          setUpdate = {
+            'indexedPhotos.$.faceDescriptors': photo.faceDescriptors || [],
+            'indexedPhotos.$.bibs': photo.bibs || [],
+            'indexedPhotos.$.ocr': photo.ocr || false
+          };
+        }
+        
         bulkOps.push({
           updateOne: {
             filter: { _id: eventId, 'indexedPhotos.id': photo.id },
             update: {
-              $set: {
-                'indexedPhotos.$.faceDescriptors': photo.faceDescriptors || [],
-                'indexedPhotos.$.bibs': photo.bibs || [],
-                'indexedPhotos.$.ocr': photo.ocr || false
-              }
+              $set: setUpdate
             }
           }
         });

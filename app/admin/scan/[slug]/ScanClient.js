@@ -19,25 +19,31 @@ export default function ScanClient({ event, initialPhotos }) {
 
   const [scriptLoaded, setScriptLoaded] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Memuat library Face-API...');
-  const [eta, setEta] = useState('');
+  const [globalStatus, setGlobalStatus] = useState('Memuat library Face-API...');
+  
+  const [scanStatusFace, setScanStatusFace] = useState('');
+  const [scanStatusBib, setScanStatusBib] = useState('');
+  
+  const [etaFace, setEtaFace] = useState('');
+  const [etaBib, setEtaBib] = useState('');
 
   // Scanned photo IDs from database
   const [indexedPhotos, setIndexedPhotos] = useState(event.indexedPhotos || []);
 
   // Scanning state
-  const [isScanning, setIsScanning] = useState(false);
-  const [activeScanType, setActiveScanType] = useState(null); // 'face' | 'bib' | null
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isScanningFace, setIsScanningFace] = useState(false);
+  const [isScanningBib, setIsScanningBib] = useState(false);
   const [scanResults, setScanResults] = useState([]);
 
-  const stopRef = useRef(false);
+  const stopFaceRef = useRef(false);
+  const stopBibRef = useRef(false);
   const loadingRef = useRef(false);
-  const currentIndexRef = useRef(0);
+  const currentIndexFaceRef = useRef(0);
+  const currentIndexBibRef = useRef(0);
 
   // Keep alive session during scanning
   useEffect(() => {
-    if (!isScanning) return;
+    if (!isScanningFace && !isScanningBib) return;
     const interval = setInterval(async () => {
       try {
         await fetch('/api/auth');
@@ -46,7 +52,7 @@ export default function ScanClient({ event, initialPhotos }) {
       }
     }, 60000); // ping every 1 minute
     return () => clearInterval(interval);
-  }, [isScanning]);
+  }, [isScanningFace, isScanningBib]);
 
   const totalPhotos = initialPhotos.length;
 
@@ -68,7 +74,6 @@ export default function ScanClient({ event, initialPhotos }) {
     return dbPhoto && dbPhoto.ocr === true;
   }).length;
   const percentBibIndexed = totalPhotos > 0 ? Math.round((bibIndexedCount / totalPhotos) * 100) : 0;
-  const isComplete = unscannedBibPhotos.length === 0 && totalPhotos > 0;
 
   // On mount, check if faceapi is already loaded globally by layout
   useEffect(() => {
@@ -88,10 +93,10 @@ export default function ScanClient({ event, initialPhotos }) {
       });
 
       if (hasUnscannedBib) {
-        setStatusMessage('✅ Memulai pemindaian BIB otomatis...');
-        setTimeout(() => { setActiveScanType('bib'); startScan('bib'); }, 800);
+        setGlobalStatus('✅ Memulai pemindaian BIB otomatis...');
+        setTimeout(() => { startScanBib(); }, 800);
       } else {
-        setStatusMessage('✅ Seluruh foto telah terindeks. Siap untuk scan ulang jika diperlukan.');
+        setGlobalStatus('✅ Seluruh foto telah terindeks. Siap untuk scan ulang jika diperlukan.');
       }
       return;
     }
@@ -105,7 +110,7 @@ export default function ScanClient({ event, initialPhotos }) {
     if (loadingRef.current || modelsLoaded) return;
     loadingRef.current = true;
     try {
-      setStatusMessage('Memuat model AI (Tiny Face Detector + Face Recognition)...');
+      setGlobalStatus('Memuat model AI (Tiny Face Detector + Face Recognition)...');
       const faceapi = window.faceapi;
 
       await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
@@ -113,10 +118,6 @@ export default function ScanClient({ event, initialPhotos }) {
       await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
 
       setModelsLoaded(true);
-
-      // Auto-start scan if there are unscanned photos (missing face index or BIB index)
-      const hasFaceEnabled = event.enableFaceSearch !== false;
-      const hasBibEnabled = event.enableBibSearch !== false;
 
       const hasUnscannedFace = hasFaceEnabled && initialPhotos.some(p => {
         const dbPhoto = (event.indexedPhotos || []).find(x => x.id === p.id);
@@ -127,65 +128,50 @@ export default function ScanClient({ event, initialPhotos }) {
         return !dbPhoto || !dbPhoto.ocr;
       });
 
-      if (hasUnscannedFace) {
-        setStatusMessage('✅ Model siap. Memulai pemindaian Wajah otomatis...');
-        setTimeout(() => { setActiveScanType('face'); startScan('face'); }, 800);
-      } else if (hasUnscannedBib) {
-        setStatusMessage('✅ Model siap. Memulai pembaruan indeks BIB otomatis...');
-        setTimeout(() => { setActiveScanType('bib'); startScan('bib'); }, 800);
+      if (hasUnscannedFace || hasUnscannedBib) {
+        setGlobalStatus('✅ Model siap. Memulai pemindaian otomatis...');
+        setTimeout(() => { 
+          if (hasUnscannedFace) startScanFace(); 
+          if (hasUnscannedBib) startScanBib(); 
+        }, 800);
       } else {
-        setStatusMessage('✅ Seluruh foto telah terindeks. Siap untuk scan ulang jika diperlukan.');
+        setGlobalStatus('✅ Seluruh foto telah terindeks. Siap untuk scan ulang jika diperlukan.');
       }
     } catch (error) {
       console.error('Gagal memuat model:', error);
-      setStatusMessage('❌ Gagal memuat model AI: ' + error.message);
+      setGlobalStatus('❌ Gagal memuat model AI: ' + error.message);
       loadingRef.current = false;
     }
   };
 
-  const startScan = useCallback(async (type) => {
+  const startScanFace = async () => {
     const faceapi = window.faceapi;
-    if (type === 'face' && (!faceapi || !faceapi.nets.tinyFaceDetector.params)) {
-      return;
-    }
+    if (!faceapi || !faceapi.nets.tinyFaceDetector.params) return;
 
-    setIsScanning(true);
-    stopRef.current = false;
-    setEta('');
+    setIsScanningFace(true);
+    stopFaceRef.current = false;
+    setEtaFace('');
+    setScanStatusFace('Memulai pemindaian Wajah...');
 
     const scanStartTime = Date.now();
     let processedThisSession = 0;
 
-    // Use live unscanned list at call time
-    const currentIndexedMap = new Map((event.indexedPhotos || []).map(p => [p.id, p]));
-    const sessionIndexed = [];
-
-    const toScan = initialPhotos.filter(p => {
-      const dbPhoto = currentIndexedMap.get(p.id);
-      if (type === 'face') {
-        return !dbPhoto;
-      } else {
-        return !dbPhoto || !dbPhoto.ocr;
-      }
-    });
-
+    const currentIndexedMap = new Map((indexedPhotos || []).map(p => [p.id, p]));
+    const toScan = initialPhotos.filter(p => !currentIndexedMap.get(p.id));
+    
     const totalIndexedBefore = initialPhotos.length - toScan.length;
-
     const detectorSize = 608;
-    const detectorOptions = type === 'face' ? new faceapi.TinyFaceDetectorOptions({
-      inputSize: detectorSize,
-      scoreThreshold: 0.35,
-    }) : null;
-
-    const CONCURRENCY = 1;
+    const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: detectorSize, scoreThreshold: 0.35 });
+    
+    const CONCURRENCY = 2; // For face
     let batchToSave = [];
     let processedCount = 0;
 
-    for (let i = currentIndexRef.current; i < toScan.length; i += CONCURRENCY) {
-      if (stopRef.current) {
-        setStatusMessage('⏸️ Pemindaian dijeda. Klik "Lanjutkan Scan" untuk melanjutkan.');
-        setIsScanning(false);
-        setEta('');
+    for (let i = currentIndexFaceRef.current; i < toScan.length; i += CONCURRENCY) {
+      if (stopFaceRef.current) {
+        setScanStatusFace('⏸️ Pemindaian Wajah dijeda.');
+        setIsScanningFace(false);
+        setEtaFace('');
         return;
       }
 
@@ -193,80 +179,29 @@ export default function ScanClient({ event, initialPhotos }) {
       const startAbsolute = totalIndexedBefore + i + 1;
       const endAbsolute = totalIndexedBefore + i + currentChunk.length;
       
-      setStatusMessage(`📷 [Scan ${type === 'face' ? 'Wajah' : 'BIB'}] Memproses Batch (${startAbsolute}-${endAbsolute}/${totalPhotos})...`);
+      setScanStatusFace(`📷 [Scan Wajah] Memproses Batch (${startAbsolute}-${endAbsolute}/${totalPhotos})...`);
 
       const chunkResults = await Promise.all(currentChunk.map(async (photo) => {
         try {
-          let faceDescriptors = [];
-          let bibs = [];
-          const dbPhoto = currentIndexedMap.get(photo.id);
+          const dbPhoto = indexedPhotos.find(p => p.id === photo.id) || currentIndexedMap.get(photo.id);
           const existingBibs = dbPhoto?.bibs || [];
           const existingOcr = dbPhoto?.ocr || false;
-          let isOcrDone = existingOcr;
 
-          if (type === 'bib') {
-            let attempt = 0;
-            let success = false;
-            let lastError = null;
+          const proxyUrl = `/api/proxy-image?id=${photo.id}&sz=w800`;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = proxyUrl;
 
-            while (attempt < 5 && !success) {
-              if (stopRef.current) throw new Error('Dibatalkan pengguna');
-              
-              const res = await fetch('/api/admin/scan-bib', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  eventId: event._id,
-                  driveFileId: photo.id,
-                  photoName: photo.name,
-                  thumbnailLink: photo.thumbnailLink,
-                  webContentLink: photo.webContentLink,
-                }),
-              });
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error('Gagal memuat gambar dari Drive proxy'));
+          });
 
-              if (res.status === 429) {
-                attempt++;
-                lastError = new Error('Terlalu banyak request. PaddleOCR tidak merespons.');
-                // Exponential backoff dengan jitter: 15s, 30s, 60s
-                const baseDelay = 15000 * Math.pow(2, attempt - 1);
-                const jitter = Math.random() * 5000; 
-                const delayMs = baseDelay + jitter;
-                
-                setStatusMessage(`⏳ PaddleOCR belum siap. Menunggu ${Math.round(delayMs/1000)} detik sebelum mengulang ${photo.name}...`);
-                await new Promise(r => setTimeout(r, delayMs));
-                continue;
-              }
-
-              if (!res.ok) throw new Error(`Gagal memproses BIB di backend: ${res.statusText}`);
-              const result = await res.json();
-              if (!result.success) throw new Error(result.error || 'Gagal memproses BIB di backend');
-              
-              bibs = result.data;
-              isOcrDone = true;
-              faceDescriptors = dbPhoto?.faceDescriptors || [];
-              success = true;
-            }
-
-            if (!success) throw lastError || new Error('Gagal scan setelah beberapa percobaan.');
-          } else {
-            const proxyUrl = `/api/proxy-image?id=${photo.id}&sz=w800`;
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.src = proxyUrl;
-
-            await new Promise((resolve, reject) => {
-              img.onload = resolve;
-              img.onerror = () => reject(new Error('Gagal memuat gambar dari Drive proxy'));
-            });
-
-            const detections = await faceapi
-              .detectAllFaces(img, detectorOptions)
-              .withFaceLandmarks()
-              .withFaceDescriptors();
-            faceDescriptors = detections.map(d => Array.from(d.descriptor));
-            bibs = existingBibs;
-            isOcrDone = existingOcr;
-          }
+          const detections = await faceapi
+            .detectAllFaces(img, detectorOptions)
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+          const faceDescriptors = detections.map(d => Array.from(d.descriptor));
 
           return {
             success: true,
@@ -277,38 +212,35 @@ export default function ScanClient({ event, initialPhotos }) {
               thumbnailLink: photo.thumbnailLink,
               webContentLink: photo.webContentLink,
               faceDescriptors,
-              bibs,
-              ocr: isOcrDone,
+              bibs: existingBibs,
+              ocr: existingOcr,
             },
-            facesCount: type === 'face' ? faceDescriptors.length : (dbPhoto?.faceDescriptors?.length || 0),
+            facesCount: faceDescriptors.length,
           };
         } catch (err) {
           return { success: false, photo, error: err.message };
         }
       }));
 
-      // Process chunk results
       const newScanResults = [];
       const successfulPhotos = [];
 
       for (const res of chunkResults) {
         if (res.success) {
           batchToSave.push(res.indexedPhoto);
-          sessionIndexed.push(res.indexedPhoto);
           successfulPhotos.push(res.indexedPhoto);
           newScanResults.push({
             id: res.photo.id,
             name: res.photo.name,
             facesCount: res.facesCount,
-            bibsCount: res.indexedPhoto.bibs.length,
-            bibsList: res.indexedPhoto.bibs,
+            type: 'FACE',
             status: 'success',
           });
         } else {
           newScanResults.push({
             id: res.photo.id,
             name: res.photo.name,
-            facesCount: 0,
+            type: 'FACE',
             status: 'failed',
             error: res.error,
           });
@@ -320,19 +252,18 @@ export default function ScanClient({ event, initialPhotos }) {
         for (const photo of successfulPhotos) {
           const idx = updated.findIndex(x => x.id === photo.id);
           if (idx > -1) {
-            updated[idx] = photo;
+             updated[idx] = { ...updated[idx], faceDescriptors: photo.faceDescriptors };
           } else {
-            updated.push(photo);
+             updated.push(photo);
           }
         }
         return updated;
       });
 
-      setScanResults(prev => [...newScanResults.reverse(), ...prev].slice(0, 30));
+      setScanResults(prev => [...newScanResults.reverse(), ...prev].slice(0, 100));
 
       processedCount += currentChunk.length;
-      currentIndexRef.current = i + currentChunk.length;
-      setCurrentIndex(processedCount);
+      currentIndexFaceRef.current = i + currentChunk.length;
 
       // Save batch to database
       if (batchToSave.length >= 5 || i + CONCURRENCY >= toScan.length) {
@@ -340,9 +271,9 @@ export default function ScanClient({ event, initialPhotos }) {
           const res = await fetch('/api/index-photos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ eventId: event._id, photos: batchToSave }),
+            body: JSON.stringify({ eventId: event._id, photos: batchToSave, updateType: 'face' }),
           });
-          if (!res.ok) console.error('Gagal menyimpan hasil scan ke database');
+          if (!res.ok) console.error('Gagal menyimpan hasil scan wajah ke database');
         } finally {
           batchToSave = [];
         }
@@ -354,30 +285,202 @@ export default function ScanClient({ event, initialPhotos }) {
       const averageMsPerPhoto = elapsedMs / processedThisSession;
       const remainingPhotosCount = toScan.length - processedCount;
       const remainingMs = remainingPhotosCount * averageMsPerPhoto;
-      setEta(formatDuration(remainingMs / 1000));
+      setEtaFace(formatDuration(remainingMs / 1000));
     }
 
-    if (!stopRef.current) {
-      setIsScanning(false);
-      currentIndexRef.current = 0;
-      setEta('');
-      setStatusMessage(`🎉 Selesai! Seluruh pemindaian ${type === 'face' ? 'Wajah' : 'BIB'} berhasil diproses.`);
-      setActiveScanType(null);
+    if (!stopFaceRef.current) {
+      setIsScanningFace(false);
+      currentIndexFaceRef.current = 0;
+      setEtaFace('');
+      setScanStatusFace('🎉 Selesai! Seluruh pemindaian Wajah berhasil diproses.');
     }
-
-
-  }, [event._id, initialPhotos]);
-
-  const handleStartScan = (type) => {
-    setActiveScanType(type);
-    startScan(type);
   };
 
-  const handlePauseScan = () => {
-    stopRef.current = true;
-    setIsScanning(false);
-    setEta('');
-    setActiveScanType(null);
+  const startScanBib = async () => {
+    setIsScanningBib(true);
+    stopBibRef.current = false;
+    setEtaBib('');
+    setScanStatusBib('Memulai pemindaian BIB...');
+
+    const scanStartTime = Date.now();
+    let processedThisSession = 0;
+
+    const currentIndexedMap = new Map((indexedPhotos || []).map(p => [p.id, p]));
+    const toScan = initialPhotos.filter(p => {
+      const dbPhoto = currentIndexedMap.get(p.id);
+      return !dbPhoto || !dbPhoto.ocr;
+    });
+
+    const totalIndexedBefore = initialPhotos.length - toScan.length;
+    const CONCURRENCY = 10;
+    let batchToSave = [];
+    let processedCount = 0;
+
+    for (let i = currentIndexBibRef.current; i < toScan.length; i += CONCURRENCY) {
+      if (stopBibRef.current) {
+        setScanStatusBib('⏸️ Pemindaian BIB dijeda.');
+        setIsScanningBib(false);
+        setEtaBib('');
+        return;
+      }
+
+      const currentChunk = toScan.slice(i, i + CONCURRENCY);
+      const startAbsolute = totalIndexedBefore + i + 1;
+      const endAbsolute = totalIndexedBefore + i + currentChunk.length;
+      
+      setScanStatusBib(`📷 [Scan BIB] Memproses Batch (${startAbsolute}-${endAbsolute}/${totalPhotos})...`);
+
+      const chunkResults = await Promise.all(currentChunk.map(async (photo) => {
+        try {
+          const dbPhoto = indexedPhotos.find(p => p.id === photo.id) || currentIndexedMap.get(photo.id);
+          const existingFaceDescriptors = dbPhoto?.faceDescriptors || [];
+
+          let attempt = 0;
+          let success = false;
+          let lastError = null;
+          let bibs = [];
+
+          while (attempt < 5 && !success) {
+            if (stopBibRef.current) throw new Error('Dibatalkan pengguna');
+            
+            const res = await fetch('/api/admin/scan-bib', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                eventId: event._id,
+                driveFileId: photo.id,
+                photoName: photo.name,
+                thumbnailLink: photo.thumbnailLink,
+                webContentLink: photo.webContentLink,
+              }),
+            });
+
+            if (res.status === 429) {
+              attempt++;
+              lastError = new Error('Terlalu banyak request. PaddleOCR tidak merespons.');
+              const baseDelay = 15000 * Math.pow(2, attempt - 1);
+              const jitter = Math.random() * 5000; 
+              const delayMs = baseDelay + jitter;
+              
+              setScanStatusBib(`⏳ PaddleOCR belum siap. Menunggu ${Math.round(delayMs/1000)} detik sebelum mengulang ${photo.name}...`);
+              await new Promise(r => setTimeout(r, delayMs));
+              continue;
+            }
+
+            if (!res.ok) throw new Error(`Gagal memproses BIB di backend: ${res.statusText}`);
+            const result = await res.json();
+            if (!result.success) throw new Error(result.error || 'Gagal memproses BIB di backend');
+            
+            bibs = result.data || [];
+            success = true;
+          }
+
+          if (!success) throw lastError || new Error('Gagal scan setelah beberapa percobaan.');
+
+          return {
+            success: true,
+            photo,
+            indexedPhoto: {
+              id: photo.id,
+              name: photo.name,
+              thumbnailLink: photo.thumbnailLink,
+              webContentLink: photo.webContentLink,
+              faceDescriptors: existingFaceDescriptors,
+              bibs,
+              ocr: true,
+            },
+            bibsList: bibs
+          };
+        } catch (err) {
+          return { success: false, photo, error: err.message };
+        }
+      }));
+
+      const newScanResults = [];
+      const successfulPhotos = [];
+
+      for (const res of chunkResults) {
+        if (res.success) {
+          batchToSave.push(res.indexedPhoto);
+          successfulPhotos.push(res.indexedPhoto);
+          newScanResults.push({
+            id: res.photo.id,
+            name: res.photo.name,
+            bibsCount: res.bibsList.length,
+            bibsList: res.bibsList,
+            type: 'BIB',
+            status: 'success',
+          });
+        } else {
+          newScanResults.push({
+            id: res.photo.id,
+            name: res.photo.name,
+            type: 'BIB',
+            status: 'failed',
+            error: res.error,
+          });
+        }
+      }
+
+      setIndexedPhotos(prev => {
+        const updated = [...prev];
+        for (const photo of successfulPhotos) {
+          const idx = updated.findIndex(x => x.id === photo.id);
+          if (idx > -1) {
+             updated[idx] = { ...updated[idx], bibs: photo.bibs, ocr: photo.ocr };
+          } else {
+             updated.push(photo);
+          }
+        }
+        return updated;
+      });
+
+      setScanResults(prev => [...newScanResults.reverse(), ...prev].slice(0, 100));
+
+      processedCount += currentChunk.length;
+      currentIndexBibRef.current = i + currentChunk.length;
+
+      // Save batch to database
+      if (batchToSave.length >= 5 || i + CONCURRENCY >= toScan.length) {
+        try {
+          const res = await fetch('/api/index-photos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventId: event._id, photos: batchToSave, updateType: 'bib' }),
+          });
+          if (!res.ok) console.error('Gagal menyimpan hasil scan BIB ke database');
+        } finally {
+          batchToSave = [];
+        }
+      }
+
+      // Calculate ETA
+      processedThisSession += currentChunk.length;
+      const elapsedMs = Date.now() - scanStartTime;
+      const averageMsPerPhoto = elapsedMs / processedThisSession;
+      const remainingPhotosCount = toScan.length - processedCount;
+      const remainingMs = remainingPhotosCount * averageMsPerPhoto;
+      setEtaBib(formatDuration(remainingMs / 1000));
+    }
+
+    if (!stopBibRef.current) {
+      setIsScanningBib(false);
+      currentIndexBibRef.current = 0;
+      setEtaBib('');
+      setScanStatusBib('🎉 Selesai! Seluruh pemindaian BIB berhasil diproses.');
+    }
+  };
+
+  const handlePauseFace = () => {
+    stopFaceRef.current = true;
+    setIsScanningFace(false);
+    setEtaFace('');
+  };
+
+  const handlePauseBib = () => {
+    stopBibRef.current = true;
+    setIsScanningBib(false);
+    setEtaBib('');
   };
 
   const handleResetFaceIndex = async () => {
@@ -385,8 +488,7 @@ export default function ScanClient({ event, initialPhotos }) {
     const ok = window.confirm('Apakah Anda yakin ingin menghapus data indeks wajah untuk event ini? (Data BIB akan tetap aman.)');
     if (!ok) return;
     
-    setStatusMessage('Mereset indeks wajah di database...');
-    console.log('[ScanClient] Resetting face indexes...');
+    setGlobalStatus('Mereset indeks wajah di database...');
     try {
       const res = await fetch('/api/index-photos', {
         method: 'POST',
@@ -394,29 +496,24 @@ export default function ScanClient({ event, initialPhotos }) {
         body: JSON.stringify({ eventId: event._id, resetFace: true }),
       });
       if (res.ok) {
-        // Reset local state: clear faceDescriptors for all photos
         setIndexedPhotos(prev => prev.map(p => ({ ...p, faceDescriptors: [] })));
-        currentIndexRef.current = 0;
+        currentIndexFaceRef.current = 0;
         setScanResults([]);
-        setStatusMessage('🔄 Indeks wajah direset. Klik Scan Wajah AI untuk proses ulang.');
+        setGlobalStatus('🔄 Indeks wajah direset. Klik Scan Wajah AI untuk proses ulang.');
       } else {
-        const text = await res.text();
-        console.error('[ScanClient] Reset face failed:', text);
-        alert('Gagal mereset indeks wajah: ' + text);
+        alert('Gagal mereset indeks wajah: ' + await res.text());
       }
     } catch (err) {
-      console.error('[ScanClient] Reset face error:', err);
       alert('Error saat mereset indeks wajah: ' + err.message);
     }
   };
 
   const handleResetBibIndex = async () => {
     if (typeof window === 'undefined') return;
-    const ok = window.confirm('Reset semua data BIB? (Face descriptors aman, hanya BIB yang dihapus dan bisa scan ulang.)');
+    const ok = window.confirm('Reset semua data BIB? (Face descriptors aman, hanya BIB yang dihapus.)');
     if (!ok) return;
 
-    setStatusMessage('Mereset data BIB di database...');
-    console.log('[ScanClient] Resetting BIB indexes for event:', event._id);
+    setGlobalStatus('Mereset data BIB di database...');
     try {
       const res = await fetch('/api/index-photos', {
         method: 'POST',
@@ -424,18 +521,14 @@ export default function ScanClient({ event, initialPhotos }) {
         body: JSON.stringify({ eventId: event._id, resetBib: true }),
       });
       if (res.ok) {
-        // Reset local state: mark all photos as ocr=false
         setIndexedPhotos(prev => prev.map(p => ({ ...p, ocr: false, bibs: [] })));
-        currentIndexRef.current = 0;
+        currentIndexBibRef.current = 0;
         setScanResults([]);
-        setStatusMessage('🔄 Indeks BIB direset. Klik Scan Nomor BIB untuk proses ulang dengan algoritma baru.');
+        setGlobalStatus('🔄 Indeks BIB direset. Klik Scan Nomor BIB untuk proses ulang.');
       } else {
-        const text = await res.text();
-        console.error('[ScanClient] Reset BIB failed:', text);
-        alert('Gagal mereset indeks BIB: ' + text);
+        alert('Gagal mereset indeks BIB: ' + await res.text());
       }
     } catch (err) {
-      console.error('[ScanClient] Reset BIB error:', err);
       alert('Error saat mereset indeks BIB: ' + err.message);
     }
   };
@@ -447,7 +540,6 @@ export default function ScanClient({ event, initialPhotos }) {
         strategy="afterInteractive"
         onLoad={() => setScriptLoaded(true)}
       />
-
 
       {/* Control Panel */}
       <div className="lg:col-span-1 bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6 self-start">
@@ -475,6 +567,9 @@ export default function ScanClient({ event, initialPhotos }) {
                     style={{ width: `${percentFaceIndexed}%` }}
                   />
                 </div>
+                {isScanningFace && etaFace && (
+                   <div className="text-[10px] text-emerald-600 font-medium text-right animate-pulse">Sisa Waktu: {etaFace}</div>
+                )}
               </div>
             )}
 
@@ -491,32 +586,27 @@ export default function ScanClient({ event, initialPhotos }) {
                     style={{ width: `${percentBibIndexed}%` }}
                   />
                 </div>
+                {isScanningBib && etaBib && (
+                   <div className="text-[10px] text-indigo-600 font-medium text-right animate-pulse">Sisa Waktu: {etaBib}</div>
+                )}
               </div>
             )}
           </div>
-
-          {isScanning && eta && (
-            <div className="flex justify-between items-center text-sm bg-blue-50/50 border border-blue-100 rounded-lg px-2.5 py-1.5 mt-1 transition-all duration-300">
-              <span className="text-blue-700 font-medium">Estimasi Waktu:</span>
-              <span className="font-bold text-blue-800 animate-pulse">{eta} tersisa</span>
-            </div>
-          )}
         </div>
 
         {/* Action Buttons */}
-        <div className="pt-2 space-y-3">
-          {isScanning ? (
-            <button
-              onClick={handlePauseScan}
-              className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors animate-pulse"
-            >
-              <Pause size={16} /> Jeda Scan ({activeScanType === 'face' ? 'Wajah' : 'BIB'})
-            </button>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {hasFaceEnabled && (
+        <div className="pt-2 space-y-3 border-t border-slate-100 pt-4">
+          <div className="font-semibold text-sm text-slate-700 mb-2">Pilih Aksi Pemindaian:</div>
+          
+          <div className="flex flex-col gap-2.5">
+            {hasFaceEnabled && (
+              isScanningFace ? (
+                <button onClick={handlePauseFace} className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors animate-pulse">
+                  <Pause size={16} /> Jeda Scan Wajah
+                </button>
+              ) : (
                 <button
-                  onClick={() => handleStartScan('face')}
+                  onClick={startScanFace}
                   disabled={!modelsLoaded || unscannedFacePhotos.length === 0}
                   className={`w-full py-2.5 px-4 font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors ${
                     !modelsLoaded || unscannedFacePhotos.length === 0
@@ -526,11 +616,17 @@ export default function ScanClient({ event, initialPhotos }) {
                 >
                   <Play size={16} /> Scan Wajah AI ({unscannedFacePhotos.length} foto)
                 </button>
-              )}
+              )
+            )}
 
-              {hasBibEnabled && (
+            {hasBibEnabled && (
+              isScanningBib ? (
+                <button onClick={handlePauseBib} className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors animate-pulse">
+                  <Pause size={16} /> Jeda Scan BIB
+                </button>
+              ) : (
                 <button
-                  onClick={() => handleStartScan('bib')}
+                  onClick={startScanBib}
                   disabled={!modelsLoaded || unscannedBibPhotos.length === 0}
                   className={`w-full py-2.5 px-4 font-bold text-sm rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors ${
                     !modelsLoaded || unscannedBibPhotos.length === 0
@@ -540,36 +636,38 @@ export default function ScanClient({ event, initialPhotos }) {
                 >
                   <Play size={16} /> Scan Nomor BIB ({unscannedBibPhotos.length} foto)
                 </button>
-              )}
-            </div>
-          )}
+              )
+            )}
+          </div>
 
-          {/* Reset BIB only button */}
-          {hasBibEnabled && (
-            <button
-              onClick={handleResetBibIndex}
-              disabled={isScanning}
-              className="w-full py-2 px-4 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-600 font-bold text-xs rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
-            >
-              <RefreshCw size={13} /> Reset Indeks BIB Saja
-            </button>
-          )}
- 
-          {/* Reset Face only button */}
-          {hasFaceEnabled && (
-            <button
-              onClick={handleResetFaceIndex}
-              disabled={isScanning}
-              className="w-full py-2 px-4 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-bold text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 transition-colors"
-            >
-              <RefreshCw size={14} /> Reset Indeks Wajah Saja
-            </button>
-          )}
+          <div className="flex gap-2 pt-2">
+            {hasFaceEnabled && (
+              <button
+                onClick={handleResetFaceIndex}
+                disabled={isScanningFace || isScanningBib}
+                className="flex-1 py-2 px-2 bg-white border border-red-200 hover:bg-red-50 text-red-600 font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-colors disabled:opacity-40"
+              >
+                <RefreshCw size={12} /> Reset Wajah
+              </button>
+            )}
+            {hasBibEnabled && (
+              <button
+                onClick={handleResetBibIndex}
+                disabled={isScanningFace || isScanningBib}
+                className="flex-1 py-2 px-2 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-600 font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-colors disabled:opacity-40"
+              >
+                <RefreshCw size={12} /> Reset BIB
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Live scanning status box */}
-        <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5">
-          <p className="text-xs text-slate-500 font-medium font-mono truncate">{statusMessage}</p>
+        <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5 flex flex-col gap-1">
+          <p className="text-xs text-slate-800 font-bold">Status Sistem:</p>
+          <p className="text-xs text-slate-500 font-medium font-mono truncate">{globalStatus}</p>
+          {isScanningFace && scanStatusFace && <p className="text-[10px] text-emerald-600 font-medium font-mono truncate">{scanStatusFace}</p>}
+          {isScanningBib && scanStatusBib && <p className="text-[10px] text-indigo-600 font-medium font-mono truncate">{scanStatusBib}</p>}
         </div>
 
         {/* Technical Config */}
@@ -585,44 +683,49 @@ export default function ScanClient({ event, initialPhotos }) {
       {/* Activity Log */}
       <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col min-h-[400px]">
         <h3 className="font-bold text-slate-800 text-lg border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
-          🖥️ Log Aktivitas Pemindaian
+          🖥️ Log Aktivitas Pemindaian (Paralel)
         </h3>
 
         {scanResults.length === 0 ? (
           <div className="flex-grow flex flex-col items-center justify-center text-slate-400 py-12">
             <ImageIcon size={48} className="text-slate-200 mb-3 animate-pulse" />
             <p className="text-sm font-semibold text-slate-500">Menunggu pemindaian dimulai...</p>
-            <p className="text-xs text-slate-400 mt-1">Pemindaian akan mulai otomatis setelah model AI siap.</p>
+            <p className="text-xs text-slate-400 mt-1">Pemindaian Wajah dan BIB akan muncul bersamaan di sini.</p>
           </div>
         ) : (
           <div className="flex-grow overflow-y-auto space-y-2 max-h-[500px] pr-1">
             {scanResults.map((res, index) => (
               <div
-                key={res.id + '-' + index}
+                key={res.id + '-' + res.type + '-' + index}
                 className={`p-3 rounded-lg border text-xs flex justify-between items-center transition-all ${
                   res.status === 'success'
-                    ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800'
+                    ? (res.type === 'FACE' ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-indigo-50/50 border-indigo-100 text-indigo-800')
                     : 'bg-red-50/50 border-red-100 text-red-800'
                 }`}
               >
                 <div className="min-w-0 flex-grow pr-4">
-                  <div className="font-semibold truncate">{res.name}</div>
+                  <div className="font-semibold truncate">
+                    <span className={`mr-2 px-1.5 py-0.5 rounded text-[9px] font-bold ${res.type === 'FACE' ? 'bg-emerald-200 text-emerald-900' : 'bg-indigo-200 text-indigo-900'}`}>
+                      {res.type === 'FACE' ? 'WAJAH' : 'BIB'}
+                    </span>
+                    {res.name}
+                  </div>
                   <div className="text-[10px] text-slate-500 mt-0.5 font-mono">ID: {res.id}</div>
                 </div>
                 <div className="flex-shrink-0 flex items-center gap-2">
                   {res.status === 'success' ? (
                     <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                      {hasFaceEnabled && (
+                      {res.type === 'FACE' && (
                         <span className="font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px]">
                           👤 {res.facesCount} Wajah
                         </span>
                       )}
-                      {res.bibsList && res.bibsList.length > 0 && (
+                      {res.type === 'BIB' && res.bibsList && res.bibsList.length > 0 && (
                         <span className="font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full text-[10px]">
                           🔢 BIB: {res.bibsList.join(', ')}
                         </span>
                       )}
-                      <CheckCircle size={14} className="text-emerald-600" />
+                      <CheckCircle size={14} className={res.type === 'FACE' ? 'text-emerald-600' : 'text-indigo-600'} />
                     </div>
                   ) : (
                     <>
