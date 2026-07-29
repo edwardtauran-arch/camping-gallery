@@ -20,8 +20,8 @@ const getEventThumbnailUrl = (event) => {
 export default function AdminDashboard() {
   const router = useRouter();
   const [events, setEvents] = useState([]);
-  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
-  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
+  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
+  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -44,6 +44,7 @@ export default function AdminDashboard() {
   // Edit Confirmation Modal State
   const [isEditConfirmOpen, setIsEditConfirmOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [searchFeatureChanged, setSearchFeatureChanged] = useState(false);
 
   // Receive scan progress from admin layout via BroadcastChannel
   const [bgScanJob, setBgScanJob] = useState(null);
@@ -157,7 +158,7 @@ export default function AdminDashboard() {
       body: JSON.stringify(form)
     });
     if (res.ok) {
-      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
+      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
       setIsAddModalOpen(false);
       await fetchEvents();
     } else {
@@ -206,7 +207,23 @@ export default function AdminDashboard() {
 
   const startEdit = (event) => {
     setEditingId(event._id);
+    setSearchFeatureChanged(false);
     const formattedDate = event.date ? new Date(event.date).toISOString().split('T')[0] : '';
+    
+    let faceActive = event.enableFaceSearch === true || event.enableFaceSearch === 'true';
+    let bibActive = event.enableBibSearch === true || event.enableBibSearch === 'true';
+    
+    // Fallback for legacy events that might have both missing
+    if (event.enableFaceSearch === undefined && event.enableBibSearch === undefined) {
+      faceActive = true;
+      bibActive = false;
+    }
+    
+    // Enforce mutual exclusivity for legacy data that had both true
+    if (faceActive && bibActive) {
+      bibActive = false;
+    }
+
     setEditForm({
       title: event.title,
       slug: event.slug,
@@ -215,8 +232,8 @@ export default function AdminDashboard() {
       description: event.description || '',
       hidden: event.hidden || false,
       thumbnail: event.thumbnail || '',
-      enableFaceSearch: event.enableFaceSearch !== false,
-      enableBibSearch: event.enableBibSearch !== false
+      enableFaceSearch: faceActive,
+      enableBibSearch: bibActive
     });
     setIsEditModalOpen(true);
   };
@@ -224,7 +241,8 @@ export default function AdminDashboard() {
   const cancelEdit = () => {
     setEditingId(null);
     setIsEditModalOpen(false);
-    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: true });
+    setSearchFeatureChanged(false);
+    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
   };
 
   const openThumbnailPicker = async (target, eventOrFolderId) => {
@@ -822,28 +840,39 @@ export default function AdminDashboard() {
                 {/* Face Search */}
                 <div className="flex flex-col gap-1.5 justify-center">
                   <span className="text-xs font-semibold text-slate-700">Fitur Cari Wajah AI:</span>
-                  <button type="button" onClick={() => setEditForm({ ...editForm, enableFaceSearch: !editForm.enableFaceSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
-                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!editForm.enableFaceSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!editForm.enableFaceSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                  <button type="button" onClick={() => {
+                    setEditForm({ ...editForm, enableFaceSearch: true, enableBibSearch: false });
+                    setSearchFeatureChanged(true);
+                  }} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${editForm.enableFaceSearch !== true ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${editForm.enableFaceSearch !== true ? 'left-[3px]' : 'left-[21px]'}`} />
                     </div>
                     <span className="text-[11px] font-semibold text-slate-600">
-                      {editForm.enableFaceSearch ? 'Aktif' : 'Nonaktif'}
+                      {editForm.enableFaceSearch === true ? 'Aktif' : 'Nonaktif'}
                     </span>
                   </button>
                 </div>
                 {/* BIB Search */}
                 <div className="flex flex-col gap-1.5 justify-center">
                   <span className="text-xs font-semibold text-slate-700">Fitur Cari BIB:</span>
-                  <button type="button" onClick={() => setEditForm({ ...editForm, enableBibSearch: !editForm.enableBibSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
-                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!editForm.enableBibSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!editForm.enableBibSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                  <button type="button" onClick={() => {
+                    setEditForm({ ...editForm, enableFaceSearch: false, enableBibSearch: true });
+                    setSearchFeatureChanged(true);
+                  }} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${editForm.enableBibSearch !== true ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${editForm.enableBibSearch !== true ? 'left-[3px]' : 'left-[21px]'}`} />
                     </div>
                     <span className="text-[11px] font-semibold text-slate-600">
-                      {editForm.enableBibSearch ? 'Aktif' : 'Nonaktif'}
+                      {editForm.enableBibSearch === true ? 'Aktif' : 'Nonaktif'}
                     </span>
                   </button>
                 </div>
               </div>
+              {searchFeatureChanged && !editForm.hidden && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
+                  <span className="text-base">⚠️</span> Mengganti fitur cari dapat membuat indeks berjalan lagi dan butuh waktu lama.
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button type="button" onClick={cancelEdit} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs sm:text-sm py-2 px-4 rounded-lg flex items-center gap-1.5 transition-colors"><XCircle size={16} /> Batal</button>
                 <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm py-2 px-5 rounded-lg shadow transition-colors">Perbarui Data Event</button>
@@ -995,24 +1024,28 @@ export default function AdminDashboard() {
                 {/* Face Search */}
                 <div className="flex flex-col gap-1.5 justify-center">
                   <span className="text-xs font-semibold text-slate-700">Fitur Cari Wajah AI:</span>
-                  <button type="button" onClick={() => setForm({ ...form, enableFaceSearch: !form.enableFaceSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
-                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!form.enableFaceSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!form.enableFaceSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                  <button type="button" onClick={() => {
+                    setForm({ ...form, enableFaceSearch: true, enableBibSearch: false });
+                  }} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${form.enableFaceSearch !== true ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${form.enableFaceSearch !== true ? 'left-[3px]' : 'left-[21px]'}`} />
                     </div>
                     <span className="text-[11px] font-semibold text-slate-600">
-                      {form.enableFaceSearch !== false ? 'Aktif' : 'Nonaktif'}
+                      {form.enableFaceSearch === true ? 'Aktif' : 'Nonaktif'}
                     </span>
                   </button>
                 </div>
                 {/* BIB Search */}
                 <div className="flex flex-col gap-1.5 justify-center">
                   <span className="text-xs font-semibold text-slate-700">Fitur Cari BIB:</span>
-                  <button type="button" onClick={() => setForm({ ...form, enableBibSearch: !form.enableBibSearch })} className="flex items-center gap-2 group focus:outline-none w-fit">
-                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${!form.enableBibSearch ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${!form.enableBibSearch ? 'left-[3px]' : 'left-[21px]'}`} />
+                  <button type="button" onClick={() => {
+                    setForm({ ...form, enableFaceSearch: false, enableBibSearch: true });
+                  }} className="flex items-center gap-2 group focus:outline-none w-fit">
+                    <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${form.enableBibSearch !== true ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                      <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${form.enableBibSearch !== true ? 'left-[3px]' : 'left-[21px]'}`} />
                     </div>
                     <span className="text-[11px] font-semibold text-slate-600">
-                      {form.enableBibSearch !== false ? 'Aktif' : 'Nonaktif'}
+                      {form.enableBibSearch === true ? 'Aktif' : 'Nonaktif'}
                     </span>
                   </button>
                 </div>
