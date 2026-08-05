@@ -27,9 +27,10 @@ export default async function GalleryPage({ params }) {
   const isAdminViewingPrivate = isHidden && adminActive;
 
   // Private link mode: event is NOT hidden but marked as private (direct link only)
-  // Non-admin visitors can still see content, but without navigation UI
-  const isPrivateLink = isPrivate && !isHidden && !adminActive;
-  const isAdminViewingPrivateLink = isPrivate && !isHidden && adminActive;
+  // Navigation (header, logo, back button) is hidden for EVERYONE — including admin
+  const isPrivateLink = isPrivate && !isHidden;
+  // Admin still gets the info notice banner
+  const isAdminViewingPrivateLink = isPrivateLink && adminActive;
 
   // If private notice is shown, we do not fetch the photos from Drive (secure)
   const photos = showPrivateNotice ? [] : await getPhotosFromFolder(event.driveFolderId);
@@ -59,8 +60,8 @@ export default async function GalleryPage({ params }) {
       )}
 
       <div className="mb-5 sm:mb-8">
-        {/* Only show back button when NOT a private link (or if admin is viewing) */}
-        {(!isPrivateLink) && (
+        {/* Hide back button on private link pages for everyone */}
+        {!isPrivateLink && (
           <Link href="/" className="text-xs sm:text-sm font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mb-3 sm:mb-4">
             ← Kembali ke Beranda
           </Link>
