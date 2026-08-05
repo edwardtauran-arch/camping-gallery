@@ -6,7 +6,7 @@ import { useSearch } from '../context/SearchContext';
 import { useRouter, usePathname } from 'next/navigation';
 
 export default function Header() {
-  const { searchQuery, setSearchQuery } = useSearch();
+  const { searchQuery, setSearchQuery, isPrivatePage } = useSearch();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -24,6 +24,9 @@ export default function Header() {
       router.push('/');
     }
   };
+
+  // Hide header completely on private gallery pages (non-admin visitors)
+  if (isPrivatePage) return null;
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50">

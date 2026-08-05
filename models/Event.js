@@ -7,6 +7,7 @@ const EventSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   description: { type: String },
   hidden: { type: Boolean, default: false },
+  isPrivate: { type: Boolean, default: false },
   drivePhotosCount: { type: Number, default: 0 },
   thumbnail: { type: String },
   enableFaceSearch: { type: Boolean, default: true },

@@ -6,9 +6,10 @@ const SearchContext = createContext();
 
 export function SearchProvider({ children }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [isPrivatePage, setIsPrivatePage] = useState(false);
 
   return (
-    <SearchContext.Provider value={{ searchQuery, setSearchQuery }}>
+    <SearchContext.Provider value={{ searchQuery, setSearchQuery, isPrivatePage, setIsPrivatePage }}>
       {children}
     </SearchContext.Provider>
   );

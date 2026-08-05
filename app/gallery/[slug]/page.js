@@ -21,8 +21,15 @@ export default async function GalleryPage({ params }) {
   const adminActive = session && session.value === 'authenticated';
 
   const isHidden = event.hidden === true;
+  const isPrivate = event.isPrivate === true;
+
   const showPrivateNotice = isHidden && !adminActive;
   const isAdminViewingPrivate = isHidden && adminActive;
+
+  // Private link mode: event is NOT hidden but marked as private (direct link only)
+  // Non-admin visitors can still see content, but without navigation UI
+  const isPrivateLink = isPrivate && !isHidden && !adminActive;
+  const isAdminViewingPrivateLink = isPrivate && !isHidden && adminActive;
 
   // If private notice is shown, we do not fetch the photos from Drive (secure)
   const photos = showPrivateNotice ? [] : await getPhotosFromFolder(event.driveFolderId);
@@ -40,10 +47,24 @@ export default async function GalleryPage({ params }) {
         </div>
       )}
 
+      {/* Admin private-link page notice */}
+      {isAdminViewingPrivateLink && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-3 sm:p-4 mb-5 flex items-start gap-2.5 text-xs">
+          <span className="text-base leading-none">🔗</span>
+          <div>
+            <p className="font-bold">Mode Private Link (Admin View)</p>
+            <p className="text-blue-700 text-[11px] mt-0.5">Galeri ini bersifat <strong>Private</strong> — tidak tampil di beranda dan hanya bisa diakses via direct link. Pengunjung tidak akan melihat header atau tombol navigasi.</p>
+          </div>
+        </div>
+      )}
+
       <div className="mb-5 sm:mb-8">
-        <Link href="/" className="text-xs sm:text-sm font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mb-3 sm:mb-4">
-          ← Kembali ke Beranda
-        </Link>
+        {/* Only show back button when NOT a private link (or if admin is viewing) */}
+        {(!isPrivateLink) && (
+          <Link href="/" className="text-xs sm:text-sm font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mb-3 sm:mb-4">
+            ← Kembali ke Beranda
+          </Link>
+        )}
         <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">{event.title}</h1>
         <p className="text-slate-500 mt-1 text-xs sm:text-base">
           Total: {showPrivateNotice ? 0 : photos.length} Foto terdeteksi di storage
@@ -60,6 +81,7 @@ export default async function GalleryPage({ params }) {
           photos={photos} 
           event={JSON.parse(JSON.stringify(event))} 
           isPrivate={showPrivateNotice}
+          isPrivateLink={isPrivateLink}
         />
       )}
     </div>

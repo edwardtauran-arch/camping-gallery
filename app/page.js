@@ -10,8 +10,9 @@ export default async function HomePage() {
   await dbConnect();
   
   // Ambil data event hanya dengan field-field yang diperlukan saja untuk optimalisasi payload
-  const events = await Event.find({ hidden: { $ne: true } })
-    .select('title slug date description hidden drivePhotosCount thumbnail indexedPhotos.id')
+  // Sembunyikan event hidden DAN event private (direct link only)
+  const events = await Event.find({ hidden: { $ne: true }, isPrivate: { $ne: true } })
+    .select('title slug date description hidden isPrivate drivePhotosCount thumbnail indexedPhotos.id')
     .sort({ date: -1 });
 
   // Konversi dokumen ke plain object dan acak thumbnail di server

@@ -48,7 +48,7 @@ export async function GET(request) {
       {
         $project: {
           _id: 1, title: 1, slug: 1, driveFolderId: 1, date: 1,
-          description: 1, hidden: 1, thumbnail: 1, drivePhotosCount: 1,
+          description: 1, hidden: 1, isPrivate: 1, thumbnail: 1, drivePhotosCount: 1,
           enableFaceSearch: 1, enableBibSearch: 1,
           // Compute counts server-side (no array transfer)
           indexedPhotosCount: { $size: { $ifNull: ['$indexedPhotos', []] } },
@@ -87,7 +87,7 @@ export async function POST(request) {
       console.error("Gagal mendapatkan jumlah foto Google Drive saat POST:", e);
     }
 
-    const newEvent = await Event.create({ ...body, drivePhotosCount });
+    const newEvent = await Event.create({ ...body, drivePhotosCount, isPrivate: body.isPrivate === true });
     return NextResponse.json({ success: true, data: newEvent });
   } catch (err) {
     return NextResponse.json({ success: false, error: err.message }, { status: 400 });
@@ -101,7 +101,7 @@ export async function PUT(request) {
   try {
     const body = await request.json();
     console.log("[API EVENTS PUT] Received body:", body);
-    const { id, title, slug, driveFolderId, date, description, hidden, thumbnail, enableFaceSearch, enableBibSearch } = body;
+    const { id, title, slug, driveFolderId, date, description, hidden, isPrivate, thumbnail, enableFaceSearch, enableBibSearch } = body;
     
     // Fetch Google Drive photo count once on update
     let drivePhotosCount = 0;
@@ -121,6 +121,7 @@ export async function PUT(request) {
         date, 
         description, 
         hidden: !!hidden, 
+        isPrivate: !!isPrivate,
         drivePhotosCount, 
         thumbnail,
         enableFaceSearch: enableFaceSearch !== undefined ? !!enableFaceSearch : true,

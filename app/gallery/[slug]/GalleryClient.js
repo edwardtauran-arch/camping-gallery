@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Download, ChevronLeft, ChevronRight, Camera, Upload, User, Sparkles, AlertCircle, SlidersHorizontal, EyeOff } from 'lucide-react';
 import Script from 'next/script';
 import Link from 'next/link';
+import { useSearch } from '@/app/context/SearchContext';
 
 // Threshold labels
 const THRESHOLD_LABELS = {
@@ -23,8 +24,20 @@ function getThresholdInfo(val) {
   return THRESHOLD_LABELS[closest] || THRESHOLD_LABELS[0.55];
 }
 
-export default function GalleryClient({ photos, event, isPrivate = false }) {
+export default function GalleryClient({ photos, event, isPrivate = false, isPrivateLink = false }) {
+  const { setIsPrivatePage } = useSearch();
   const [selectedPhoto, setSelectedPhoto] = useState(null);
+
+  // Set private page flag in context so Header can hide itself
+  useEffect(() => {
+    if (isPrivateLink) {
+      setIsPrivatePage(true);
+    }
+    return () => {
+      // Reset when leaving page
+      setIsPrivatePage(false);
+    };
+  }, [isPrivateLink, setIsPrivatePage]);
 
   // Private mode UI block
   if (isPrivate) {

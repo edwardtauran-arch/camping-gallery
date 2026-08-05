@@ -20,8 +20,8 @@ const getEventThumbnailUrl = (event) => {
 export default function AdminDashboard() {
   const router = useRouter();
   const [events, setEvents] = useState([]);
-  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
-  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
+  const [form, setForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, isPrivate: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
+  const [editForm, setEditForm] = useState({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, isPrivate: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -158,7 +158,7 @@ export default function AdminDashboard() {
       body: JSON.stringify(form)
     });
     if (res.ok) {
-      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
+      setForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, isPrivate: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
       setIsAddModalOpen(false);
       await fetchEvents();
     } else {
@@ -231,6 +231,7 @@ export default function AdminDashboard() {
       date: formattedDate,
       description: event.description || '',
       hidden: event.hidden || false,
+      isPrivate: event.isPrivate === true,
       thumbnail: event.thumbnail || '',
       enableFaceSearch: faceActive,
       enableBibSearch: bibActive
@@ -242,7 +243,7 @@ export default function AdminDashboard() {
     setEditingId(null);
     setIsEditModalOpen(false);
     setSearchFeatureChanged(false);
-    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
+    setEditForm({ title: '', slug: '', driveFolderId: '', date: '', description: '', hidden: false, isPrivate: false, thumbnail: '', enableFaceSearch: true, enableBibSearch: false });
   };
 
   const openThumbnailPicker = async (target, eventOrFolderId) => {
@@ -824,7 +825,7 @@ export default function AdminDashboard() {
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">Kosongkan jika ingin menggunakan foto pertama yang terindeks secara otomatis.</p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
                 {/* Visibilitas */}
                 <div className="flex flex-col gap-1.5 justify-center">
                   <span className="text-xs font-semibold text-slate-700">Visibilitas Galeri:</span>
@@ -836,6 +837,30 @@ export default function AdminDashboard() {
                       {editForm.hidden ? 'Tersembunyi' : 'Tampil Publik'}
                     </span>
                   </button>
+                </div>
+                {/* Private Link */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Mode Private Link:</span>
+                  {editForm.hidden ? (
+                    <div className="flex items-center gap-2">
+                      <div className="relative w-10 h-[22px] rounded-full bg-blue-400 opacity-50 cursor-not-allowed">
+                        <div className="absolute top-[3px] left-[21px] w-4 h-4 rounded-full bg-white shadow-md" />
+                      </div>
+                      <span className="text-[10px] font-semibold text-slate-400 italic">Otomatis (tersembunyi)</span>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setEditForm({ ...editForm, isPrivate: !editForm.isPrivate })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                      <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${editForm.isPrivate ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                        <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${editForm.isPrivate ? 'left-[21px]' : 'left-[3px]'}`} />
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-600">
+                        {editForm.isPrivate ? 'Private' : 'Publik'}
+                      </span>
+                    </button>
+                  )}
+                  {editForm.isPrivate && !editForm.hidden && (
+                    <p className="text-[10px] text-blue-600 leading-tight">Tidak tampil di beranda. Header & navigasi disembunyikan.</p>
+                  )}
                 </div>
                 {/* Face Search */}
                 <div className="flex flex-col gap-1.5 justify-center">
@@ -910,6 +935,12 @@ export default function AdminDashboard() {
               <div className="flex justify-between">
                 <span className="text-slate-500 font-medium">Visibilitas</span>
                 <span className={`font-semibold ${editForm.hidden ? 'text-slate-500' : 'text-emerald-600'}`}>{editForm.hidden ? 'Tersembunyi' : 'Tampil Publik'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-medium">Mode Private Link</span>
+                <span className={`font-semibold ${editForm.isPrivate || editForm.hidden ? 'text-blue-600' : 'text-slate-400'}`}>
+                  {editForm.hidden ? 'Aktif (Tersembunyi)' : editForm.isPrivate ? 'Aktif' : 'Nonaktif'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500 font-medium">Cari Wajah AI</span>
@@ -1008,7 +1039,7 @@ export default function AdminDashboard() {
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">Kosongkan jika ingin menggunakan foto pertama yang terindeks secara otomatis.</p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
                 {/* Visibilitas */}
                 <div className="flex flex-col gap-1.5 justify-center">
                   <span className="text-xs font-semibold text-slate-700">Visibilitas Galeri:</span>
@@ -1020,6 +1051,30 @@ export default function AdminDashboard() {
                       {form.hidden ? 'Tersembunyi' : 'Tampil Publik'}
                     </span>
                   </button>
+                </div>
+                {/* Private Link */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <span className="text-xs font-semibold text-slate-700">Mode Private Link:</span>
+                  {form.hidden ? (
+                    <div className="flex items-center gap-2">
+                      <div className="relative w-10 h-[22px] rounded-full bg-blue-400 opacity-50 cursor-not-allowed">
+                        <div className="absolute top-[3px] left-[21px] w-4 h-4 rounded-full bg-white shadow-md" />
+                      </div>
+                      <span className="text-[10px] font-semibold text-slate-400 italic">Otomatis (tersembunyi)</span>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setForm({ ...form, isPrivate: !form.isPrivate })} className="flex items-center gap-2 group focus:outline-none w-fit">
+                      <div className={`relative w-10 h-[22px] rounded-full transition-colors duration-300 ${form.isPrivate ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                        <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${form.isPrivate ? 'left-[21px]' : 'left-[3px]'}`} />
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-600">
+                        {form.isPrivate ? 'Private' : 'Publik'}
+                      </span>
+                    </button>
+                  )}
+                  {form.isPrivate && !form.hidden && (
+                    <p className="text-[10px] text-blue-600 leading-tight">Tidak tampil di beranda. Header & navigasi disembunyikan.</p>
+                  )}
                 </div>
                 {/* Face Search */}
                 <div className="flex flex-col gap-1.5 justify-center">
