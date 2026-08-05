@@ -29,8 +29,6 @@ export default async function GalleryPage({ params }) {
   // Private link mode: event is NOT hidden but marked as private (direct link only)
   // Navigation (header, logo, back button) is hidden for EVERYONE — including admin
   const isPrivateLink = isPrivate && !isHidden;
-  // Admin still gets the info notice banner
-  const isAdminViewingPrivateLink = isPrivateLink && adminActive;
 
   // If private notice is shown, we do not fetch the photos from Drive (secure)
   const photos = showPrivateNotice ? [] : await getPhotosFromFolder(event.driveFolderId);
@@ -47,8 +45,6 @@ export default async function GalleryPage({ params }) {
           </div>
         </div>
       )}
-
-
 
       <div className="mb-5 sm:mb-8">
         {/* Hide back button on private link pages for everyone */}

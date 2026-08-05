@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Download, ChevronLeft, ChevronRight, Camera, Upload, User, Sparkles, AlertCircle, SlidersHorizontal, EyeOff } from 'lucide-react';
 import Script from 'next/script';
 import Link from 'next/link';

@@ -100,7 +100,6 @@ export async function PUT(request) {
   await dbConnect();
   try {
     const body = await request.json();
-    console.log("[API EVENTS PUT] Received body:", body);
     const { id, title, slug, driveFolderId, date, description, hidden, isPrivate, thumbnail, enableFaceSearch, enableBibSearch } = body;
     
     // Fetch Google Drive photo count once on update
@@ -129,7 +128,6 @@ export async function PUT(request) {
       },
       { new: true } // Mengembalikan data terbaru setelah di-update
     );
-    console.log("[API EVENTS PUT] Updated event in DB:", updatedEvent);
     return NextResponse.json({ success: true, data: updatedEvent });
   } catch (err) {
     console.error("[API EVENTS PUT] Error:", err);
