@@ -48,16 +48,7 @@ export default async function GalleryPage({ params }) {
         </div>
       )}
 
-      {/* Admin private-link page notice */}
-      {isAdminViewingPrivateLink && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-3 sm:p-4 mb-5 flex items-start gap-2.5 text-xs">
-          <span className="text-base leading-none">🔗</span>
-          <div>
-            <p className="font-bold">Mode Private Link (Admin View)</p>
-            <p className="text-blue-700 text-[11px] mt-0.5">Galeri ini bersifat <strong>Private</strong> — tidak tampil di beranda dan hanya bisa diakses via direct link. Pengunjung tidak akan melihat header atau tombol navigasi.</p>
-          </div>
-        </div>
-      )}
+
 
       <div className="mb-5 sm:mb-8">
         {/* Hide back button on private link pages for everyone */}
@@ -67,9 +58,7 @@ export default async function GalleryPage({ params }) {
           </Link>
         )}
         <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">{event.title}</h1>
-        <p className="text-slate-500 mt-1 text-xs sm:text-base">
-          Total: {showPrivateNotice ? 0 : photos.length} Foto terdeteksi di storage
-        </p>
+
       </div>
 
       {photos.length === 0 && !showPrivateNotice ? (
