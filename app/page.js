@@ -34,7 +34,7 @@ export default async function HomePage() {
       eventObj.date = eventObj.date.toISOString();
     }
     
-    return eventObj;
+    return JSON.parse(JSON.stringify(eventObj));
   });
 
   return (
