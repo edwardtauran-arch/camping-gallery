@@ -87,14 +87,18 @@ export default function ScanClient({ event, initialPhotos }) {
     if (!hasFaceEnabled) {
       setModelsLoaded(true);
       
+      const alreadyHasIndex = (event.indexedPhotos || []).some(p => p.ocr === true);
       const hasUnscannedBib = hasBibEnabled && initialPhotos.some(p => {
         const dbPhoto = (event.indexedPhotos || []).find(x => x.id === p.id);
         return !dbPhoto || !dbPhoto.ocr;
       });
 
-      if (hasUnscannedBib) {
-        setGlobalStatus('✅ Memulai pemindaian BIB otomatis...');
+      if (!alreadyHasIndex && hasUnscannedBib) {
+        // Only auto-start BIB if no BIB index exists at all
+        setGlobalStatus('✅ Memulai pemindaian BIB otomatis (event baru)...');
         setTimeout(() => { startScanBib(); }, 800);
+      } else if (hasUnscannedBib) {
+        setGlobalStatus('✅ Ada foto BIB belum terindeks. Klik tombol scan untuk melanjutkan.');
       } else {
         setGlobalStatus('✅ Seluruh foto telah terindeks. Siap untuk scan ulang jika diperlukan.');
       }
@@ -119,6 +123,8 @@ export default function ScanClient({ event, initialPhotos }) {
 
       setModelsLoaded(true);
 
+      const alreadyHasIndex = (event.indexedPhotos || []).length > 0;
+
       const hasUnscannedFace = hasFaceEnabled && initialPhotos.some(p => {
         const dbPhoto = (event.indexedPhotos || []).find(x => x.id === p.id);
         return !dbPhoto;
@@ -128,12 +134,16 @@ export default function ScanClient({ event, initialPhotos }) {
         return !dbPhoto || !dbPhoto.ocr;
       });
 
-      if (hasUnscannedFace || hasUnscannedBib) {
-        setGlobalStatus('✅ Model siap. Memulai pemindaian otomatis...');
+      if (!alreadyHasIndex && (hasUnscannedFace || hasUnscannedBib)) {
+        // Only auto-start if there's NO index at all (fresh event)
+        setGlobalStatus('✅ Model siap. Memulai pemindaian otomatis (event baru)...');
         setTimeout(() => { 
           if (hasUnscannedFace) startScanFace(); 
           if (hasUnscannedBib) startScanBib(); 
         }, 800);
+      } else if (hasUnscannedFace || hasUnscannedBib) {
+        // Already has some index — show status, let user start manually
+        setGlobalStatus('✅ Model siap. Ada foto belum terindeks. Klik tombol scan untuk melanjutkan.');
       } else {
         setGlobalStatus('✅ Seluruh foto telah terindeks. Siap untuk scan ulang jika diperlukan.');
       }

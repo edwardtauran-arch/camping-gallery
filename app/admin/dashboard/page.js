@@ -446,12 +446,15 @@ export default function AdminDashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredEvents.map((event) => {
               const driveCount = event.drivePhotosCount || 0;
-              const currentIndexedCount = realtimeCounts[event._id] !== undefined
+              const rawIndexedCount = realtimeCounts[event._id] !== undefined
                 ? realtimeCounts[event._id]
                 : (event.indexedPhotosCount ?? (event.indexedPhotos ? event.indexedPhotos.length : 0));
-              const currentBibCount = realtimeBibCounts[event._id] !== undefined
+              const rawBibCount = realtimeBibCounts[event._id] !== undefined
                 ? realtimeBibCounts[event._id]
                 : (event.bibIndexedCount ?? (event.indexedPhotos ? event.indexedPhotos.filter(p => p.ocr === true).length : 0));
+              // Cap to driveCount so we never show e.g. 2436/1763
+              const currentIndexedCount = driveCount > 0 ? Math.min(rawIndexedCount, driveCount) : rawIndexedCount;
+              const currentBibCount = driveCount > 0 ? Math.min(rawBibCount, driveCount) : rawBibCount;
               const isScanning = bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done;
               const scanDone = bgScanJob && bgScanJob.eventId === event._id && bgScanJob.done;
               return (
@@ -646,12 +649,15 @@ export default function AdminDashboard() {
               <tbody className="divide-y divide-slate-200 bg-white">
                 {filteredEvents.map((event) => {
                   const driveCount = event.drivePhotosCount || 0;
-                  const currentIndexedCount = realtimeCounts[event._id] !== undefined
+                  const rawIndexedCount = realtimeCounts[event._id] !== undefined
                     ? realtimeCounts[event._id]
                     : (event.indexedPhotosCount ?? (event.indexedPhotos ? event.indexedPhotos.length : 0));
-                  const currentBibCount = realtimeBibCounts[event._id] !== undefined
+                  const rawBibCount = realtimeBibCounts[event._id] !== undefined
                     ? realtimeBibCounts[event._id]
                     : (event.bibIndexedCount ?? (event.indexedPhotos ? event.indexedPhotos.filter(p => p.ocr === true).length : 0));
+                  // Cap to driveCount so we never show e.g. 2436/1763
+                  const currentIndexedCount = driveCount > 0 ? Math.min(rawIndexedCount, driveCount) : rawIndexedCount;
+                  const currentBibCount = driveCount > 0 ? Math.min(rawBibCount, driveCount) : rawBibCount;
                   return (
                     <tr key={event._id} className={`hover:bg-slate-50/55 transition-colors ${editingId === event._id ? 'bg-amber-50/20' : ''}`}>
                       <td className={`px-6 py-4 transition-opacity ${event.hidden ? 'opacity-55' : ''}`}>
