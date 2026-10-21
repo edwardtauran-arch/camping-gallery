@@ -40,6 +40,25 @@ export default function ScanClient({ event, initialPhotos }) {
   const loadingRef = useRef(false);
   const currentIndexFaceRef = useRef(0);
   const currentIndexBibRef = useRef(0);
+  const handoffRef = useRef(null);
+  const scanningFaceRef = useRef(false);
+  const scanningBibRef = useRef(false);
+
+  useEffect(() => { scanningFaceRef.current = isScanningFace; }, [isScanningFace]);
+  useEffect(() => { scanningBibRef.current = isScanningBib; }, [isScanningBib]);
+
+  // Saat keluar dari Monitor: hentikan loop lokal & serahkan scan yang masih berjalan ke latar belakang
+  useEffect(() => {
+    return () => {
+      const wasFace = scanningFaceRef.current;
+      const wasBib = scanningBibRef.current;
+      stopFaceRef.current = true;
+      stopBibRef.current = true;
+      if (wasFace || wasBib) {
+        window.bgScanResume = { event, type: wasFace ? 'face' : 'bib' };
+      }
+    };
+  }, []);
 
   // Keep alive session during scanning
   useEffect(() => {
@@ -56,12 +75,17 @@ export default function ScanClient({ event, initialPhotos }) {
 
   const totalPhotos = initialPhotos.length;
 
-  // Derived: Face index stats
+  // Derived: Face index stats (same rule as dashboard & background scanner)
+  const isFaceScanned = (dbPhoto) => {
+    if (!dbPhoto) return false;
+    if (typeof dbPhoto.faceScanned === 'boolean') return dbPhoto.faceScanned;
+    return (dbPhoto.faceDescriptors || []).length > 0;
+  };
   const unscannedFacePhotos = initialPhotos.filter(p => {
     const dbPhoto = indexedPhotos.find(ip => ip.id === p.id);
-    return !dbPhoto;
+    return !isFaceScanned(dbPhoto);
   });
-  const faceIndexedCount = initialPhotos.filter(p => indexedPhotos.some(ip => ip.id === p.id)).length;
+  const faceIndexedCount = totalPhotos - unscannedFacePhotos.length;
   const percentFaceIndexed = totalPhotos > 0 ? Math.round((faceIndexedCount / totalPhotos) * 100) : 0;
 
   // Derived: BIB index stats
@@ -77,8 +101,14 @@ export default function ScanClient({ event, initialPhotos }) {
 
   // On mount, check if faceapi is already loaded globally by layout
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.faceapi) {
-      setScriptLoaded(true);
+    if (typeof window !== 'undefined') {
+      // Ambil serah-terima dari scan latar belakang (jika baru saja berjalan untuk event ini)
+      const handoff = window.bgScanHandoff;
+      if (handoff && handoff.eventId === event._id && Date.now() - handoff.ts < 20000) {
+        handoffRef.current = handoff;
+      }
+      delete window.bgScanHandoff;
+      if (window.faceapi) setScriptLoaded(true);
     }
   }, []);
 
@@ -93,7 +123,11 @@ export default function ScanClient({ event, initialPhotos }) {
         return !dbPhoto || !dbPhoto.ocr;
       });
 
-      if (!alreadyHasIndex && hasUnscannedBib) {
+      if (handoffRef.current && hasUnscannedBib && handoffRef.current.scanType === 'bib') {
+        handoffRef.current = null;
+        setGlobalStatus('▶️ Melanjutkan pemindaian BIB dari latar belakang...');
+        setTimeout(() => { startScanBib(); }, 1500);
+      } else if (!alreadyHasIndex && hasUnscannedBib) {
         // Only auto-start BIB if no BIB index exists at all
         setGlobalStatus('✅ Memulai pemindaian BIB otomatis (event baru)...');
         setTimeout(() => { startScanBib(); }, 800);
@@ -114,10 +148,11 @@ export default function ScanClient({ event, initialPhotos }) {
     if (loadingRef.current || modelsLoaded) return;
     loadingRef.current = true;
     try {
-      setGlobalStatus('Memuat model AI (Tiny Face Detector + Face Recognition)...');
+      setGlobalStatus('Memuat model AI (SSD MobileNet v1 + Face Recognition)...');
       const faceapi = window.faceapi;
 
-      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+      // SSD MobileNet v1 — more accurate for group & outdoor photos
+      await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
       await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
       await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
 
@@ -127,14 +162,29 @@ export default function ScanClient({ event, initialPhotos }) {
 
       const hasUnscannedFace = hasFaceEnabled && initialPhotos.some(p => {
         const dbPhoto = (event.indexedPhotos || []).find(x => x.id === p.id);
-        return !dbPhoto;
+        if (!dbPhoto) return true;
+        if (typeof dbPhoto.faceScanned === 'boolean') return !dbPhoto.faceScanned;
+        return (dbPhoto.faceDescriptors || []).length === 0;
       });
       const hasUnscannedBib = hasBibEnabled && initialPhotos.some(p => {
         const dbPhoto = (event.indexedPhotos || []).find(x => x.id === p.id);
         return !dbPhoto || !dbPhoto.ocr;
       });
 
-      if (!alreadyHasIndex && (hasUnscannedFace || hasUnscannedBib)) {
+      if (handoffRef.current && (hasUnscannedFace || hasUnscannedBib)) {
+        // Scan latar belakang sedang berjalan untuk event ini → lanjutkan otomatis di Monitor
+        const type = handoffRef.current.scanType;
+        handoffRef.current = null;
+        setGlobalStatus('▶️ Melanjutkan pemindaian dari latar belakang...');
+        setTimeout(() => {
+          if (type === 'bib') { if (hasUnscannedBib) startScanBib(); }
+          else if (type === 'face') { if (hasUnscannedFace) startScanFace(); }
+          else {
+            if (hasUnscannedFace) startScanFace();
+            if (hasUnscannedBib) startScanBib();
+          }
+        }, 1500);
+      } else if (!alreadyHasIndex && (hasUnscannedFace || hasUnscannedBib)) {
         // Only auto-start if there's NO index at all (fresh event)
         setGlobalStatus('✅ Model siap. Memulai pemindaian otomatis (event baru)...');
         setTimeout(() => { 
@@ -154,11 +204,28 @@ export default function ScanClient({ event, initialPhotos }) {
     }
   };
 
-  const startScanFace = async () => {
-    const faceapi = window.faceapi;
-    if (!faceapi || !faceapi.nets.tinyFaceDetector.params) return;
+  // Tunggu scan latar belakang (layout) benar-benar berhenti agar tidak ada dua scan bersamaan
+  const waitForBgIdle = async () => {
+    const started = Date.now();
+    while (typeof window !== 'undefined' && window.bgScanIsRunning && window.bgScanIsRunning() && Date.now() - started < 15000) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  };
 
+  const startScanFace = async () => {
+    if (scanningFaceRef.current) return; // sudah berjalan, jangan numpuk
+    scanningFaceRef.current = true;
     setIsScanningFace(true);
+    setScanStatusFace('Menunggu scan latar belakang berhenti...');
+    await waitForBgIdle();
+
+    const faceapi = window.faceapi;
+    if (!faceapi || !faceapi.nets.ssdMobilenetv1.params) {
+      scanningFaceRef.current = false;
+      setIsScanningFace(false);
+      return;
+    }
+
     stopFaceRef.current = false;
     setEtaFace('');
     setScanStatusFace('Memulai pemindaian Wajah...');
@@ -167,11 +234,17 @@ export default function ScanClient({ event, initialPhotos }) {
     let processedThisSession = 0;
 
     const currentIndexedMap = new Map((indexedPhotos || []).map(p => [p.id, p]));
-    const toScan = initialPhotos.filter(p => !currentIndexedMap.get(p.id));
+    // Scan if: not in DB yet, OR faceScanned is false (after reset)
+    const toScan = initialPhotos.filter(p => {
+      const dbPhoto = currentIndexedMap.get(p.id);
+      if (!dbPhoto) return true;
+      if (typeof dbPhoto.faceScanned === 'boolean') return !dbPhoto.faceScanned;
+      return (dbPhoto.faceDescriptors || []).length === 0;
+    });
     
     const totalIndexedBefore = initialPhotos.length - toScan.length;
-    const detectorSize = 608;
-    const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: detectorSize, scoreThreshold: 0.35 });
+    // SSD MobileNet v1 — minConfidence 0.5 good balance accuracy vs false positives
+    const detectorOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5, maxResults: 50 });
     
     const CONCURRENCY = 2; // For face
     let batchToSave = [];
@@ -222,6 +295,7 @@ export default function ScanClient({ event, initialPhotos }) {
               thumbnailLink: photo.thumbnailLink,
               webContentLink: photo.webContentLink,
               faceDescriptors,
+              faceScanned: true,
               bibs: existingBibs,
               ocr: existingOcr,
             },
@@ -307,7 +381,11 @@ export default function ScanClient({ event, initialPhotos }) {
   };
 
   const startScanBib = async () => {
+    if (scanningBibRef.current) return; // sudah berjalan, jangan numpuk
+    scanningBibRef.current = true;
     setIsScanningBib(true);
+    setScanStatusBib('Menunggu scan latar belakang berhenti...');
+    await waitForBgIdle();
     stopBibRef.current = false;
     setEtaBib('');
     setScanStatusBib('Memulai pemindaian BIB...');
@@ -683,10 +761,10 @@ export default function ScanClient({ event, initialPhotos }) {
         {/* Technical Config */}
         <div className="pt-4 border-t border-slate-100 text-[11px] text-slate-400 space-y-1">
           <div className="font-semibold text-slate-500 flex items-center gap-1">⚙️ Konfigurasi Model AI</div>
-          {hasFaceEnabled && <div>Detektor: Tiny Face Detector (Input 608px)</div>}
+          {hasFaceEnabled && <div>Detektor: SSD MobileNet v1 (minConfidence 0.5)</div>}
           {hasFaceEnabled && <div>Pengenalan Wajah: 128-D Face Recognition</div>}
           {hasBibEnabled && <div>Deteksi BIB: PaddleOCR</div>}
-          <div>Resolusi: {hasBibEnabled ? 'BIB: 800px' : ''} {hasFaceEnabled && hasBibEnabled ? ' | ' : ''} {hasFaceEnabled ? 'Wajah: 800px' : ''}</div>
+          <div>Resolusi Wajah: 800px</div>
         </div>
       </div>
 

@@ -51,7 +51,21 @@ export async function GET(request) {
           description: 1, hidden: 1, isPrivate: 1, thumbnail: 1, drivePhotosCount: 1,
           enableFaceSearch: 1, enableBibSearch: 1,
           // Compute counts server-side (no array transfer)
-          indexedPhotosCount: { $size: { $ifNull: ['$indexedPhotos', []] } },
+          indexedEntriesCount: { $size: { $ifNull: ['$indexedPhotos', []] } },
+          indexedPhotosCount: {
+            $size: {
+              $filter: {
+                input: { $ifNull: ['$indexedPhotos', []] },
+                as: 'p',
+                cond: {
+                  $or: [
+                    { $eq: ['$$p.faceScanned', true] },
+                    { $gt: [{ $size: { $ifNull: ['$$p.faceDescriptors', []] } }, 0] }
+                  ]
+                }
+              }
+            }
+          },
           bibIndexedCount: {
             $size: {
               $filter: {
@@ -147,7 +161,7 @@ export async function DELETE(request) {
   }
 }
 
-// Toggle visibility ATAU sinkronisasi jumlah foto
+// Toggle visibility ATAU sinkronisasi jumlah foto ATAU reset indeks wajah
 export async function PATCH(request) {
   if (!isAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await dbConnect();
@@ -169,6 +183,19 @@ export async function PATCH(request) {
 
       await event.save();
       return NextResponse.json({ success: true, data: { drivePhotosCount: event.drivePhotosCount } });
+
+    } else if (action === 'reset-face') {
+      // Reset indeks wajah: kosongkan faceDescriptors, pertahankan data BIB/OCR
+      // Foto yang tidak punya BIB data juga (benar-benar kosong) → hapus dari array
+      if (event.indexedPhotos && event.indexedPhotos.length > 0) {
+        event.indexedPhotos = event.indexedPhotos
+          .map(p => ({ ...p.toObject(), faceDescriptors: [], faceScanned: false }))
+          .filter(p => p.ocr === true || (p.bibs && p.bibs.length > 0));
+      }
+      await event.save();
+      const resetCount = event.indexedPhotos?.filter(p => (p.faceDescriptors || []).length === 0).length ?? 0;
+      return NextResponse.json({ success: true, data: { resetCount } });
+
     } else {
       // Toggle visibility
       event.hidden = !event.hidden;

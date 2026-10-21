@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Loader2, CheckCircle2, ExternalLink, ImageOff, Image as ImageIcon } from 'lucide-react';
+import Link from 'next/link';
+import { Trash2, Pencil, PlusCircle, LogOut, Calendar, XCircle, Cpu, Eye, EyeOff, Search, Grid, List, RefreshCw, Loader2, CheckCircle2, ExternalLink, ImageOff, Image as ImageIcon, RotateCcw } from 'lucide-react';
 
 const getEventThumbnailUrl = (event) => {
   if (event.thumbnail) {
@@ -46,6 +47,10 @@ export default function AdminDashboard() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [searchFeatureChanged, setSearchFeatureChanged] = useState(false);
 
+  // Re-index queue: set of event IDs queued for face re-indexing
+  const [reindexQueue, setReindexQueue] = useState(new Set());
+  const [resettingId, setResettingId] = useState(null);
+
   // Receive scan progress from admin layout via BroadcastChannel
   const [bgScanJob, setBgScanJob] = useState(null);
   const [realtimeCounts, setRealtimeCounts] = useState({});
@@ -62,53 +67,75 @@ export default function AdminDashboard() {
     const channel = new BroadcastChannel('bg-scan-progress');
     channel.onmessage = (e) => {
       const data = e.data;
-      if (data.type === 'batch-saved') {
+      if (data.type === 'queue-updated' && Array.isArray(data.queue)) {
+        setReindexQueue(new Set(data.queue));
+      } else if (data.type === 'batch-saved') {
         fetchEvents();
-      } else {
-        setBgScanJob(data);
+      } else if (data.type === 'snapshot' || (data.eventId && data.progress !== undefined)) {
+        // Handle both live updates and snapshot replies from layout
+        if (data.type !== 'snapshot') {
+          // Regular live update
+          setBgScanJob(data);
+        } else {
+          // Snapshot reply: restore bgScanJob state
+          const snap = { ...data };
+          delete snap.type;
+          setBgScanJob(snap);
+        }
 
-        if (data.eventId && data.progress !== undefined) {
-          if (data.scanType === 'bib' || data.scanType == null) {
+        const jobData = data.type === 'snapshot' ? { ...data } : data;
+
+        if (jobData.eventId && jobData.progress !== undefined) {
+          if (jobData.scanType === 'bib' || jobData.scanType == null) {
             // Track BIB count in real-time using authoritative startingBibCount from layout
-            if (bibScanStartsRef.current[data.eventId] === undefined) {
-              if (data.startingBibCount !== undefined) {
-                // Use the value sent by layout (most accurate - from event.indexedPhotos at scan start)
-                bibScanStartsRef.current[data.eventId] = data.startingBibCount;
+            if (bibScanStartsRef.current[jobData.eventId] === undefined) {
+              if (jobData.startingBibCount !== undefined) {
+                bibScanStartsRef.current[jobData.eventId] = jobData.startingBibCount;
               } else {
-                const eventObj = eventsRef.current.find(ev => ev._id === data.eventId);
-                bibScanStartsRef.current[data.eventId] = eventObj?.indexedPhotos
+                const eventObj = eventsRef.current.find(ev => ev._id === jobData.eventId);
+                bibScanStartsRef.current[jobData.eventId] = eventObj?.indexedPhotos
                   ? eventObj.indexedPhotos.filter(p => p.ocr === true).length
                   : 0;
               }
             }
-            const currentBib = bibScanStartsRef.current[data.eventId] + data.progress;
-            setRealtimeBibCounts(prev => ({ ...prev, [data.eventId]: currentBib }));
+            const currentBib = jobData.displayProgress !== undefined
+              ? jobData.displayProgress
+              : (bibScanStartsRef.current[jobData.eventId] + jobData.progress);
+            setRealtimeBibCounts(prev => ({ ...prev, [jobData.eventId]: currentBib }));
           }
 
-          if (data.scanType === 'face' || data.scanType == null) {
+          if (jobData.scanType === 'face' || jobData.scanType == null) {
             // Track Face count in real-time using authoritative startingFaceCount from layout
-            if (scanStartsRef.current[data.eventId] === undefined) {
-              if (data.startingFaceCount !== undefined) {
-                scanStartsRef.current[data.eventId] = data.startingFaceCount;
+            if (scanStartsRef.current[jobData.eventId] === undefined) {
+              if (jobData.startingFaceCount !== undefined) {
+                scanStartsRef.current[jobData.eventId] = jobData.startingFaceCount;
               } else {
-                const eventObj = eventsRef.current.find(ev => ev._id === data.eventId);
-                scanStartsRef.current[data.eventId] = eventObj?.indexedPhotosCount ?? (eventObj?.indexedPhotos ? eventObj.indexedPhotos.length : 0);
+                const eventObj = eventsRef.current.find(ev => ev._id === jobData.eventId);
+                scanStartsRef.current[jobData.eventId] = eventObj?.indexedPhotosCount ?? (eventObj?.indexedPhotos ? eventObj.indexedPhotos.length : 0);
               }
             }
-            const currentCount = scanStartsRef.current[data.eventId] + data.progress;
-            setRealtimeCounts(prev => ({ ...prev, [data.eventId]: currentCount }));
+            const currentCount = jobData.displayProgress !== undefined
+              ? jobData.displayProgress
+              : (scanStartsRef.current[jobData.eventId] + jobData.progress);
+            setRealtimeCounts(prev => ({ ...prev, [jobData.eventId]: currentCount }));
           }
-        }
 
-        if (data.done) {
-          delete scanStartsRef.current[data.eventId];
-          delete bibScanStartsRef.current[data.eventId];
-          setRealtimeCounts(prev => { const c = { ...prev }; delete c[data.eventId]; return c; });
-          setRealtimeBibCounts(prev => { const c = { ...prev }; delete c[data.eventId]; return c; });
-          fetchEvents();
+          if (jobData.done) {
+            delete scanStartsRef.current[jobData.eventId];
+            delete bibScanStartsRef.current[jobData.eventId];
+            setRealtimeCounts(prev => { const c = { ...prev }; delete c[jobData.eventId]; return c; });
+            setRealtimeBibCounts(prev => { const c = { ...prev }; delete c[jobData.eventId]; return c; });
+            // Remove from re-index queue when scan completes
+            setReindexQueue(prev => { const s = new Set(prev); s.delete(jobData.eventId); return s; });
+            fetchEvents();
+          }
         }
       }
     };
+
+    // Request current scan state from layout immediately on mount
+    try { channel.postMessage({ type: 'request-snapshot' }); } catch (_) {}
+
     return () => channel.close();
   }, []);
 
@@ -377,11 +404,42 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/events', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action: 'sync' }) });
       const json = await res.json();
       if (json.success) {
-        fetchEvents(); // Ambil ulang data event untuk memperbarui hitungan indeks
+        fetchEvents();
         alert('🔄 Sinkronisasi berhasil! Data foto usang juga telah dibersihkan dari indeks.');
       } else { alert('❌ Gagal sinkronisasi.'); }
     } catch { alert('❌ Terjadi kesalahan.'); }
     finally { setSyncingId(null); }
+  };
+
+  const handleResetFaceIndex = async (event) => {
+    if (!confirm(`Reset indeks wajah "${event.title}"?\n\nFoto akan di-scan ulang dengan SSD MobileNet v1 secara otomatis. Data BIB tetap aman.`)) return;
+    setResettingId(event._id);
+    try {
+      const res = await fetch('/api/admin/events', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: event._id, action: 'reset-face' })
+      });
+      const json = await res.json();
+      if (json.success) {
+        // Add to queue so user sees it's waiting
+        setReindexQueue(prev => new Set([...prev, event._id]));
+        // Clear realtime counts so count shows 0 (reset)
+        setRealtimeCounts(prev => { const c = { ...prev }; delete c[event._id]; return c; });
+        scanStartsRef.current[event._id] = 0;
+        // Trigger background scan immediately
+        if (window.triggerBgScan) {
+          window.triggerBgScan(event, 'face');
+        }
+        await fetchEvents();
+      } else {
+        alert('❌ Gagal reset indeks wajah.');
+      }
+    } catch {
+      alert('❌ Terjadi kesalahan.');
+    } finally {
+      setResettingId(null);
+    }
   };
 
   return (
@@ -539,6 +597,13 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
+                  {reindexQueue.has(event._id) && !isScanning && (
+                    <div className="mt-3 rounded-xl bg-slate-100 px-3 py-2 border border-slate-200 flex items-center gap-1.5">
+                      <RotateCcw size={12} className="text-slate-400" />
+                      <span className="text-[11px] font-bold text-slate-500">Dalam antrian</span>
+                    </div>
+                  )}
+
                   {/* Inline scan progress — no close button */}
                   {(isScanning || scanDone) && (
                     <div className="mt-3 rounded-xl bg-slate-900 px-3 py-2.5 border border-slate-700">
@@ -547,25 +612,25 @@ export default function AdminDashboard() {
                           ? <CheckCircle2 size={13} className="text-emerald-400" />
                           : <Loader2 size={13} className="text-amber-400 animate-spin" />}
                         <span className="text-[11px] font-bold text-white">
-                          {scanDone ? 'Scan Selesai!' : 'Scanning Latar Belakang...'}
+                          {scanDone ? 'Scan Selesai!' : 'On proses...'}
                         </span>
                       </div>
                       <div className="w-full bg-slate-700 rounded-full h-1.5">
                         <div
                           className="h-1.5 rounded-full transition-all duration-500"
                           style={{
-                            width: bgScanJob.total > 0 ? `${Math.round((bgScanJob.progress / bgScanJob.total) * 100)}%` : '0%',
+                            width: (bgScanJob.displayTotal ?? bgScanJob.total) > 0 ? `${Math.round(((bgScanJob.displayProgress ?? bgScanJob.progress) / (bgScanJob.displayTotal ?? bgScanJob.total)) * 100)}%` : '0%',
                             background: scanDone ? '#34d399' : 'linear-gradient(90deg, #f59e0b, #ef4444)'
                           }}
                         />
                       </div>
                       <div className="flex justify-between mt-1">
                         <span className="text-[10px] text-slate-400">
-                          {bgScanJob.progress} / {bgScanJob.total} foto
+                          {bgScanJob.displayProgress ?? bgScanJob.progress} / {bgScanJob.displayTotal ?? bgScanJob.total} foto
                           {bgScanJob.eta && ` • ${bgScanJob.eta} tersisa`}
                         </span>
                         <span className="text-[10px] text-slate-400">
-                          {bgScanJob.total > 0 ? Math.round((bgScanJob.progress / bgScanJob.total) * 100) : 0}%
+                          {(bgScanJob.displayTotal ?? bgScanJob.total) > 0 ? Math.round(((bgScanJob.displayProgress ?? bgScanJob.progress) / (bgScanJob.displayTotal ?? bgScanJob.total)) * 100) : 0}%
                         </span>
                       </div>
                     </div>
@@ -610,11 +675,37 @@ export default function AdminDashboard() {
                             <span className="text-[10px] ml-1 font-bold">BIB</span>
                           </button>
                         )}
-                        <a href={`/admin/scan/${event.slug}`}
+                        <Link href={`/admin/scan/${event.slug}`}
                           className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition-all"
                           title="Halaman Monitoring Detail Scan">
                           Monitor
-                        </a>
+                        </Link>
+                        {event.enableFaceSearch !== false && (
+                          <button
+                            onClick={() => handleResetFaceIndex(event)}
+                            disabled={resettingId === event._id}
+                            title="Reset & Re-scan Wajah (SSD MobileNet v1)"
+                            className={`flex items-center justify-center p-2 rounded-lg text-xs font-semibold transition-all ${
+                              reindexQueue.has(event._id)
+                                ? 'bg-orange-100 text-orange-600 border border-orange-300 cursor-default'
+                                : 'bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100'
+                            }`}
+                          >
+                            {resettingId === event._id ? (
+                              <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                            ) : reindexQueue.has(event._id) ? (
+                              <>
+                                <RotateCcw size={14} className="animate-spin flex-shrink-0" />
+                                <span className="text-[10px] ml-1 font-bold">Antri</span>
+                              </>
+                            ) : (
+                              <>
+                                <RotateCcw size={14} className="flex-shrink-0" />
+                                <span className="text-[10px] ml-1 font-bold">Re-scan</span>
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
                       <button onClick={() => startEdit(event)}
                         className="flex items-center justify-center p-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 transition-all"
@@ -688,9 +779,15 @@ export default function AdminDashboard() {
                           <div className="mt-1 flex items-center gap-1.5">
                             <Loader2 size={10} className="text-amber-500 animate-spin" />
                             <span className="text-[10px] text-amber-600 font-semibold">
-                              Scanning {bgScanJob.progress}/{bgScanJob.total}
+                              On proses {bgScanJob.displayProgress ?? bgScanJob.progress}/{bgScanJob.displayTotal ?? bgScanJob.total}
                               {bgScanJob.eta && ` (${bgScanJob.eta})`}
                             </span>
+                          </div>
+                         )}
+                        {reindexQueue.has(event._id) && !(bgScanJob && bgScanJob.eventId === event._id && !bgScanJob.done) && (
+                          <div className="mt-1 flex items-center gap-1.5">
+                            <RotateCcw size={10} className="text-slate-400" />
+                            <span className="text-[10px] text-slate-500 font-semibold">Dalam antrian</span>
                           </div>
                         )}
                       </td>
@@ -755,9 +852,28 @@ export default function AdminDashboard() {
                               <span className="text-[9px] font-bold">BIB</span>
                             </button>
                           )}
-                          <a href={`/admin/scan/${event.slug}`}
+                          <Link href={`/admin/scan/${event.slug}`}
                             className="inline-flex items-center justify-center p-1.5 bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 rounded text-xs transition-colors"
-                            title="Monitor Detail Scan">🔍</a>
+                            title="Monitor Detail Scan">🔍</Link>
+                          {event.enableFaceSearch !== false && (
+                            <button
+                              onClick={() => handleResetFaceIndex(event)}
+                              disabled={resettingId === event._id}
+                              title="Reset & Re-scan Wajah (SSD MobileNet v1)"
+                              className={`inline-flex items-center justify-center gap-1 p-1.5 rounded text-xs font-bold transition-colors ${
+                                reindexQueue.has(event._id)
+                                  ? 'bg-orange-100 text-orange-600 border border-orange-300 cursor-default'
+                                  : 'bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100'
+                              }`}
+                            >
+                              {resettingId === event._id
+                                ? <Loader2 size={12} className="animate-spin" />
+                                : reindexQueue.has(event._id)
+                                  ? <><RotateCcw size={12} className="animate-spin" /><span className="text-[9px]">Antri</span></>
+                                  : <><RotateCcw size={12} /><span className="text-[9px]">Re-scan</span></>
+                              }
+                            </button>
+                          )}
                           <button onClick={() => startEdit(event)}
                             className="inline-flex items-center justify-center p-1.5 bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 hover:text-amber-700 rounded text-xs transition-colors"
                             title="Ubah"><Pencil size={12} /></button>

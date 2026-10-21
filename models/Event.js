@@ -19,6 +19,7 @@ const EventSchema = new mongoose.Schema({
     thumbnailLink: String,
     webContentLink: String,
     faceDescriptors: [Array], // Menyimpan array koordinat wajah (Float32Array diubah ke Array biasa)
+    faceScanned: Boolean, // Penanda apakah foto sudah dipindai deteksi wajah SSD MobileNet
     bibs: [String], // Menyimpan nomor BIB yang terdeteksi di gambar
     ocr: Boolean // Penanda apakah foto sudah dipindai oleh mesin OCR baru
   }]

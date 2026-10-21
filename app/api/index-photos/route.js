@@ -39,7 +39,7 @@ export async function POST(req) {
     if (resetFace) {
       const result = await Event.updateOne(
         { _id: eventId },
-        { $set: { 'indexedPhotos.$[].faceDescriptors': [] } }
+        { $set: { 'indexedPhotos.$[].faceDescriptors': [], 'indexedPhotos.$[].faceScanned': false } }
       );
       return NextResponse.json({ success: true, modified: result.modifiedCount });
     }
@@ -73,12 +73,16 @@ export async function POST(req) {
         console.log(`- Bulk Update photo ${photo.id}: updateType: ${updateType || 'all'}`);
         let setUpdate = {};
         if (updateType === 'face') {
-          setUpdate = { 'indexedPhotos.$.faceDescriptors': photo.faceDescriptors || [] };
+          setUpdate = {
+            'indexedPhotos.$.faceDescriptors': photo.faceDescriptors || [],
+            'indexedPhotos.$.faceScanned': true
+          };
         } else if (updateType === 'bib') {
           setUpdate = { 'indexedPhotos.$.bibs': photo.bibs || [], 'indexedPhotos.$.ocr': photo.ocr || false };
         } else {
           setUpdate = {
             'indexedPhotos.$.faceDescriptors': photo.faceDescriptors || [],
+            'indexedPhotos.$.faceScanned': photo.faceScanned !== undefined ? photo.faceScanned : true,
             'indexedPhotos.$.bibs': photo.bibs || [],
             'indexedPhotos.$.ocr': photo.ocr || false
           };
@@ -105,6 +109,7 @@ export async function POST(req) {
                   thumbnailLink: photo.thumbnailLink || '',
                   webContentLink: photo.webContentLink || '',
                   faceDescriptors: photo.faceDescriptors || [],
+                  faceScanned: photo.faceScanned !== undefined ? photo.faceScanned : (updateType === 'face' || !updateType),
                   bibs: photo.bibs || [],
                   ocr: photo.ocr || false
                 }
